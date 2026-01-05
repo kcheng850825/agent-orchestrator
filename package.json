@@ -1,6 +1,6 @@
 {
   "name": "agent-orchestrator",
-  "version": "33.0.0",
+  "version": "34.0.0",
   "description": "Multi-Agent AI Orchestration System powered by Google Gemini",
   "private": true,
   "type": "module",
@@ -10,10 +10,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "dompurify": "^3.0.8",
     "lucide-react": "^0.460.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
