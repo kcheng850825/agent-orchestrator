@@ -1,6 +1,7 @@
 /**
  * Multi-Provider AI API Service
- * Supports Google Gemini, OpenAI, and Anthropic Claude
+ * Supports Google Gemini, OpenAI, Anthropic Claude, and xAI Grok
+ * Updated: January 2026
  */
 
 import { checkGuardrails } from './guardrails';
@@ -10,8 +11,9 @@ import { checkGuardrails } from './guardrails';
  */
 export const getProviderFromModel = (model) => {
   if (model.startsWith('gemini-')) return 'gemini';
-  if (model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3')) return 'openai';
+  if (model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3') || model.startsWith('o4')) return 'openai';
   if (model.startsWith('claude-')) return 'anthropic';
+  if (model.startsWith('grok-')) return 'xai';
   return 'gemini'; // default
 };
 
@@ -224,6 +226,74 @@ const callAnthropic = async (apiKey, model, systemPrompt, userPrompt, contextFil
 };
 
 /**
+ * Call xAI Grok API
+ * xAI uses an OpenAI-compatible API format
+ */
+const callXAI = async (apiKey, model, systemPrompt, userPrompt, contextFiles = [], conversationHistory = [], userAttachments = [], globalMemory = "") => {
+  if (!apiKey) throw new Error("xAI API Key is missing");
+
+  const messages = [];
+
+  // System prompt with context
+  let fullSystemPrompt = systemPrompt;
+  if (globalMemory) {
+    fullSystemPrompt += "\n\n=== GLOBAL CONVERSATION LOG ===\n" + globalMemory + "\n=== END LOG ===";
+  }
+  messages.push({ role: "system", content: fullSystemPrompt });
+
+  // Add context files to the prompt
+  let contextText = "";
+  if (contextFiles?.length > 0) {
+    contextText = "=== KNOWLEDGE BASE ===\n";
+    contextFiles.forEach(file => {
+      if (file.type !== 'application/pdf' && !file.type.startsWith('image/')) {
+        contextText += `[File: ${file.name}]\n${file.content}\n`;
+      }
+    });
+    contextText += "=== END KNOWLEDGE ===\n\n";
+  }
+
+  // Convert conversation history
+  conversationHistory.forEach(msg => {
+    if (msg.role === 'user') {
+      messages.push({ role: "user", content: msg.parts?.[0]?.text || "" });
+    } else if (msg.role === 'model') {
+      messages.push({ role: "assistant", content: msg.parts?.[0]?.text || "" });
+    }
+  });
+
+  // Add user prompt with context
+  messages.push({ role: "user", content: contextText + userPrompt });
+
+  // xAI API endpoint (OpenAI-compatible)
+  const response = await fetch("https://api.x.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey.trim()}`
+    },
+    body: JSON.stringify({
+      model: model,
+      messages: messages,
+      max_tokens: 4096,
+      temperature: 0.7
+    })
+  });
+
+  if (!response.ok) {
+    let errorMsg = response.statusText;
+    try {
+      const err = await response.json();
+      errorMsg = err.error?.message || errorMsg;
+    } catch {}
+    throw new Error(`xAI API Error: ${errorMsg}`);
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || "";
+};
+
+/**
  * Universal API caller - routes to appropriate provider
  */
 export const callAI = async (
@@ -280,6 +350,18 @@ export const callAI = async (
     case 'anthropic':
       return await callAnthropic(
         apiKeys.anthropic,
+        model,
+        systemPrompt,
+        userPrompt,
+        contextFiles,
+        conversationHistory,
+        userAttachments,
+        globalMemory
+      );
+
+    case 'xai':
+      return await callXAI(
+        apiKeys.xai,
         model,
         systemPrompt,
         userPrompt,
