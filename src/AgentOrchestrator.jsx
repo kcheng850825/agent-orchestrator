@@ -37,7 +37,8 @@ export default function AgentOrchestrator() {
   const [apiKeys, setApiKeys] = useState({
     gemini: "",
     openai: "",
-    anthropic: ""
+    anthropic: "",
+    xai: ""
   });
   const [showApiKeys, setShowApiKeys] = useState(false);
 
@@ -236,7 +237,7 @@ export default function AgentOrchestrator() {
 
   // --- AGENT GENERATOR ---
   const handleGenerateAgent = async () => {
-    if (!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic) {
+    if (!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic && !apiKeys.xai) {
       setGenericAlert({ title: "API Key Required", message: "Please enter at least one API key first." });
       return;
     }
@@ -255,7 +256,7 @@ export default function AgentOrchestrator() {
 
     try {
       // Use available API key
-      const modelToUse = apiKeys.gemini ? "gemini-2.5-flash" : apiKeys.openai ? "gpt-4o-mini" : "claude-3-5-haiku-20241022";
+      const modelToUse = apiKeys.gemini ? "gemini-2.5-flash" : apiKeys.openai ? "gpt-4o-mini" : apiKeys.anthropic ? "claude-3-5-haiku-20241022" : "grok-3-mini";
       const result = await callAI(apiKeys, modelToUse, "You are an agent generator.", metaPrompt, [], [], [], "", false, true);
 
       const cleanJson = result.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -355,7 +356,7 @@ export default function AgentOrchestrator() {
   // --- ENGINE: INIT & START ---
   const startPipeline = async () => {
     // Check if we have any API key
-    if (!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic) {
+    if (!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic && !apiKeys.xai) {
       return setLogs([{ step: 0, agentName: "System", status: "error", output: "Missing API Key. Please add at least one API key." }]);
     }
 
@@ -768,6 +769,21 @@ export default function AgentOrchestrator() {
                   placeholder="sk-ant-..."
                 />
               </div>
+
+              {/* xAI Grok */}
+              <div>
+                <label className="text-[10px] font-bold text-purple-600 flex items-center gap-1">
+                  ⚡ xAI Grok
+                  {apiKeys.xai && <Check className="w-3 h-3 text-green-500" />}
+                </label>
+                <input
+                  type="password"
+                  value={apiKeys.xai}
+                  onChange={e => setApiKeys(prev => ({ ...prev, xai: e.target.value }))}
+                  className="w-full mt-1 p-2 text-xs border rounded focus:ring-2 focus:ring-purple-500 outline-none"
+                  placeholder="xai-..."
+                />
+              </div>
             </div>
           )}
         </div>
@@ -903,10 +919,10 @@ export default function AgentOrchestrator() {
                     className="w-full p-4 border rounded-lg h-32 resize-none focus:ring-2 focus:ring-indigo-500 outline-none text-lg"
                     placeholder="Enter your initial goal or project context..."
                   />
-                  <Button onClick={startPipeline} className="w-full h-14 text-lg" disabled={!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic}>
+                  <Button onClick={startPipeline} className="w-full h-14 text-lg" disabled={!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic && !apiKeys.xai}>
                     Begin Session <ArrowRight className="w-5 h-5" />
                   </Button>
-                  {!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic && (
+                  {!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic && !apiKeys.xai && (
                     <p className="text-center text-red-500 text-sm">Please add at least one API key to start</p>
                   )}
                 </div>
