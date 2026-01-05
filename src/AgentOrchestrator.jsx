@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Bot, Play, Plus, Trash2, Layers, X,
   Maximize2, Loader2, HardDrive,
@@ -6,7 +6,9 @@ import {
   Send, ArrowRight, FileText,
   Download, History, Rewind, GitCommit,
   AlertTriangle, Database, Shield, ShieldOff,
-  BookOpen, Sparkles, Key, Check
+  BookOpen, Sparkles, Key, Check, Copy,
+  RefreshCw, Edit3, GitBranch, Zap, BarChart3,
+  ExternalLink, Share2, Expand, Lightbulb
 } from 'lucide-react';
 
 // Import components
@@ -16,7 +18,16 @@ import SimpleMarkdown from './components/ui/SimpleMarkdown';
 
 // Import services
 import dbCore from './services/database';
-import { callAI, getProviderFromModel } from './services/api';
+import {
+  callAI,
+  callAIStream,
+  callMultipleModels,
+  getProviderFromModel,
+  estimateTokens,
+  getContextWindowSize,
+  estimateCost,
+  recommendModel
+} from './services/api';
 import { checkGuardrails, getGuardrailSystemPrompt } from './services/guardrails';
 
 // Import data
@@ -89,6 +100,38 @@ export default function AgentOrchestrator() {
   const [genericAlert, setGenericAlert] = useState(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
 
+  // NEW: Streaming & Enhanced UX State
+  const [streamingText, setStreamingText] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+
+  // NEW: Message editing
+  const [editingMessageIndex, setEditingMessageIndex] = useState(null);
+  const [editedMessageText, setEditedMessageText] = useState("");
+
+  // NEW: Conversation branching
+  const [conversationBranches, setConversationBranches] = useState([]);
+  const [currentBranchId, setCurrentBranchId] = useState("main");
+
+  // NEW: Model recommendations
+  const [modelRecommendations, setModelRecommendations] = useState([]);
+  const [showRecommendations, setShowRecommendations] = useState(false);
+
+  // NEW: Multi-model comparison
+  const [compareModelsEnabled, setCompareModelsEnabled] = useState(false);
+  const [selectedCompareModels, setSelectedCompareModels] = useState([]);
+  const [comparisonResults, setComparisonResults] = useState([]);
+  const [isComparing, setIsComparing] = useState(false);
+  const [showComparisonModal, setShowComparisonModal] = useState(false);
+
+  // NEW: Agent suggestions
+  const [suggestedAgents, setSuggestedAgents] = useState([]);
+
+  // NEW: Expanded message view
+  const [expandedMessageIndex, setExpandedMessageIndex] = useState(null);
+
+  // NEW: Error with suggestions
+  const [errorWithSuggestions, setErrorWithSuggestions] = useState(null);
+
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
 
@@ -97,7 +140,48 @@ export default function AgentOrchestrator() {
     if (chatEndRef.current) {
       chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [stepHistory, isProcessingStep]);
+  }, [stepHistory, isProcessingStep, streamingText]);
+
+  // --- TOKEN ESTIMATION ---
+  const tokenEstimate = useMemo(() => {
+    if (!chatInput && chatFiles.length === 0) return null;
+
+    const step = workflow[activeStepIndex];
+    const agent = step ? agents.find(a => a.id === step.agentId) : null;
+    if (!agent) return null;
+
+    // Estimate input tokens
+    let totalText = chatInput;
+    chatFiles.forEach(f => { totalText += f.content || ''; });
+
+    // Add context from knowledge base
+    agent.knowledge.forEach(k => { totalText += k.content || ''; });
+
+    // Add global memory
+    const memoryText = globalConversationMemory.map(e => e.agentResponse).join('');
+    totalText += memoryText;
+
+    const inputTokens = estimateTokens(totalText);
+    const contextWindow = getContextWindowSize(agent.model);
+    const cost = estimateCost(agent.model, inputTokens, 2000); // Assume ~2000 output tokens
+
+    return {
+      inputTokens,
+      contextWindow,
+      percentUsed: Math.min(100, (inputTokens / contextWindow) * 100),
+      estimatedCost: cost.totalCost
+    };
+  }, [chatInput, chatFiles, activeStepIndex, workflow, agents, globalConversationMemory]);
+
+  // --- MODEL RECOMMENDATIONS ---
+  useEffect(() => {
+    if (chatInput.length > 10) {
+      const recommendations = recommendModel(chatInput, apiKeys);
+      setModelRecommendations(recommendations);
+    } else {
+      setModelRecommendations([]);
+    }
+  }, [chatInput, apiKeys]);
 
   // --- PERSISTENCE: LOAD ---
   useEffect(() => {
@@ -353,6 +437,210 @@ export default function AgentOrchestrator() {
     return !!apiKeys[provider];
   };
 
+  // --- NEW: MESSAGE EDITING & REGENERATION ---
+  const handleEditMessage = (index) => {
+    const msg = stepHistory[index];
+    if (msg.role === 'user') {
+      setEditingMessageIndex(index);
+      setEditedMessageText(msg.parts[0].text);
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (editingMessageIndex === null) return;
+
+    // Create a branch point
+    const branchId = `branch-${Date.now()}`;
+    setConversationBranches(prev => [...prev, {
+      id: branchId,
+      parentBranch: currentBranchId,
+      branchPoint: editingMessageIndex,
+      history: [...stepHistory]
+    }]);
+
+    // Truncate history to edit point and set new message
+    const newHistory = stepHistory.slice(0, editingMessageIndex);
+    newHistory.push({ role: 'user', parts: [{ text: editedMessageText }] });
+    setStepHistory(newHistory);
+    setCurrentBranchId(branchId);
+    setEditingMessageIndex(null);
+    setEditedMessageText("");
+
+    // Regenerate response
+    setChatInput(editedMessageText);
+    await handleAgentInteraction();
+  };
+
+  const handleRegenerateResponse = async (messageIndex) => {
+    // Find the user message before this response
+    const userMsgIndex = messageIndex - 1;
+    if (userMsgIndex < 0 || stepHistory[userMsgIndex].role !== 'user') return;
+
+    // Truncate history to before the response
+    const newHistory = stepHistory.slice(0, messageIndex);
+    setStepHistory(newHistory);
+
+    // Re-run with same user message
+    const userMessage = stepHistory[userMsgIndex].parts[0].text;
+    setChatInput(userMessage);
+    await handleAgentInteraction();
+  };
+
+  // --- NEW: CONVERSATION BRANCHING ---
+  const handleCreateBranch = (atIndex) => {
+    const branchId = `branch-${Date.now()}`;
+    setConversationBranches(prev => [...prev, {
+      id: branchId,
+      parentBranch: currentBranchId,
+      branchPoint: atIndex,
+      history: [...stepHistory],
+      timestamp: Date.now()
+    }]);
+
+    // Start new branch from this point
+    setStepHistory(stepHistory.slice(0, atIndex + 1));
+    setCurrentBranchId(branchId);
+  };
+
+  const handleSwitchBranch = (branchId) => {
+    const branch = conversationBranches.find(b => b.id === branchId);
+    if (branch) {
+      setStepHistory([...branch.history]);
+      setCurrentBranchId(branchId);
+    }
+  };
+
+  // --- NEW: MULTI-MODEL COMPARISON ---
+  const handleCompareModels = async () => {
+    if (selectedCompareModels.length < 2) {
+      setGenericAlert({ title: "Select Models", message: "Please select at least 2 models to compare." });
+      return;
+    }
+
+    setIsComparing(true);
+    setComparisonResults([]);
+
+    const step = workflow[activeStepIndex];
+    const agent = agents.find(a => a.id === step.agentId);
+    const contextFiles = [...agent.knowledge];
+
+    let systemPrompt = agent.prompt;
+    if (guardrailsEnabled) {
+      systemPrompt += "\n\n" + getGuardrailSystemPrompt();
+    }
+
+    try {
+      const results = await callMultipleModels(
+        apiKeys,
+        selectedCompareModels,
+        systemPrompt,
+        chatInput,
+        contextFiles,
+        [],
+        chatFiles,
+        formatGlobalMemory(),
+        (model, status, index, result) => {
+          // Update progress
+          setComparisonResults(prev => {
+            const updated = [...prev];
+            updated[index] = { model, status, result: status === 'complete' ? result : null };
+            return updated;
+          });
+        }
+      );
+
+      setComparisonResults(results);
+      setShowComparisonModal(true);
+    } catch (err) {
+      setGenericAlert({ title: "Comparison Failed", message: err.message });
+    } finally {
+      setIsComparing(false);
+    }
+  };
+
+  const handleSelectComparisonResult = (result) => {
+    // Use this result as the response
+    setCurrentStepOutput(result.result);
+    setStepHistory(prev => [
+      ...prev,
+      { role: 'user', parts: [{ text: chatInput }] },
+      { role: 'model', parts: [{ text: result.result }], model: result.model }
+    ]);
+    addToGlobalMemory(agents.find(a => a.id === workflow[activeStepIndex].agentId)?.name, activeStepIndex + 1, chatInput, result.result);
+    setChatInput("");
+    setChatFiles([]);
+    setShowComparisonModal(false);
+    setCompareModelsEnabled(false);
+    setSelectedCompareModels([]);
+  };
+
+  // --- NEW: AGENT SUGGESTIONS ---
+  const generateAgentSuggestions = (currentOutput) => {
+    const suggestions = [];
+    const output = currentOutput.toLowerCase();
+
+    agents.forEach(agent => {
+      const agentPrompt = agent.prompt.toLowerCase();
+      let score = 0;
+      let reason = "";
+
+      // Check if output mentions tasks this agent could help with
+      if (output.includes('code') && agentPrompt.includes('code')) {
+        score += 3;
+        reason = "Can help with code mentioned in output";
+      }
+      if (output.includes('review') && agentPrompt.includes('review')) {
+        score += 3;
+        reason = "Can review the generated content";
+      }
+      if (output.includes('edit') && agentPrompt.includes('edit')) {
+        score += 3;
+        reason = "Can edit and refine the content";
+      }
+      if (output.includes('research') && agentPrompt.includes('research')) {
+        score += 2;
+        reason = "Can help research further";
+      }
+      if ((output.includes('next step') || output.includes('todo')) && agentPrompt.includes('plan')) {
+        score += 2;
+        reason = "Can help plan next steps";
+      }
+
+      if (score > 0) {
+        suggestions.push({ agent, score, reason });
+      }
+    });
+
+    // Sort by score and take top 3
+    suggestions.sort((a, b) => b.score - a.score);
+    setSuggestedAgents(suggestions.slice(0, 3));
+  };
+
+  // --- NEW: COPY/SHARE RESPONSE ---
+  const handleCopyResponse = async (text, id) => {
+    const success = await copyToClipboard(text);
+    if (success) {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    }
+  };
+
+  const handleShareResponse = async (text) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Agent Response',
+          text: text.substring(0, 500) + '...'
+        });
+      } catch (err) {
+        // User cancelled or error
+      }
+    } else {
+      // Fallback to copy
+      handleCopyResponse(text, 'share');
+    }
+  };
+
   // --- ENGINE: INIT & START ---
   const startPipeline = async () => {
     // Check if we have any API key
@@ -391,10 +679,13 @@ export default function AgentOrchestrator() {
     setExecutionState("interacting");
   };
 
-  // --- ENGINE: EXECUTE (LLM CALL) ---
+  // --- ENGINE: EXECUTE (LLM CALL) - WITH STREAMING ---
   const executeStep = async (index, userPrompt) => {
     setIsProcessingStep(true);
+    setIsStreaming(true);
+    setStreamingText("");
     setGuardrailWarning(null);
+    setErrorWithSuggestions(null);
 
     const step = workflow[index];
     const agent = agents.find(a => a.id === step.agentId);
@@ -406,6 +697,7 @@ export default function AgentOrchestrator() {
         message: `No API key configured for ${getProviderFromModel(agent.model).toUpperCase()}. Please add the API key in settings.`
       });
       setIsProcessingStep(false);
+      setIsStreaming(false);
       return;
     }
 
@@ -425,7 +717,7 @@ export default function AgentOrchestrator() {
     }
 
     try {
-      const result = await callAI(
+      const result = await callAIStream(
         apiKeys,
         agent.model,
         systemPrompt,
@@ -435,7 +727,11 @@ export default function AgentOrchestrator() {
         chatFiles,
         formatGlobalMemory(),
         guardrailsEnabled,
-        guardrailOverride
+        guardrailOverride,
+        (chunk, fullText) => {
+          // Stream callback - update UI in real-time
+          setStreamingText(fullText);
+        }
       );
 
       // Check if blocked by guardrails
@@ -446,29 +742,43 @@ export default function AgentOrchestrator() {
           canOverride: result.canOverride
         });
         setIsProcessingStep(false);
+        setIsStreaming(false);
         return;
       }
 
       const outputText = typeof result === 'string' ? result : JSON.stringify(result);
       setCurrentStepOutput(outputText);
+      setStreamingText("");
       setStepHistory([{ role: 'user', parts: [{ text: fullPrompt }] }, { role: 'model', parts: [{ text: outputText }] }]);
       addToGlobalMemory(agent.name, index + 1, userPrompt, outputText);
+      generateAgentSuggestions(outputText); // Generate suggestions based on output
       setIsProcessingStep(false);
+      setIsStreaming(false);
       setChatInput("");
       setChatFiles([]);
       setGuardrailOverride(false);
       setExecutionState("interacting");
     } catch (err) {
+      // Enhanced error handling with suggestions
+      const errorInfo = err.parsed || { originalError: err.message, suggestions: [{ type: 'unknown', message: err.message, fix: 'Please try again' }] };
+      setErrorWithSuggestions(errorInfo);
       setLogs(prev => [...prev, { step: index + 1, agentName: agent.name, status: "error", output: err.message }]);
       setStepHistory(prev => [...prev, { role: 'model', parts: [{ text: `**System Error:** ${err.message}` }] }]);
       setExecutionState("interacting");
       setIsProcessingStep(false);
+      setIsStreaming(false);
     }
   };
 
-  // --- ENGINE: INTERACTION LOOP ---
+  // --- ENGINE: INTERACTION LOOP - WITH STREAMING ---
   const handleAgentInteraction = async () => {
     if (activeStepIndex === null) return;
+
+    // If compare mode is enabled, run comparison instead
+    if (compareModelsEnabled && selectedCompareModels.length >= 2) {
+      await handleCompareModels();
+      return;
+    }
 
     // Initial Run Trigger
     if (stepHistory.length === 0) {
@@ -487,7 +797,10 @@ export default function AgentOrchestrator() {
     setChatInput("");
     setChatFiles([]);
     setIsProcessingStep(true);
+    setIsStreaming(true);
+    setStreamingText("");
     setGuardrailWarning(null);
+    setErrorWithSuggestions(null);
 
     const contextFiles = [...agent.knowledge];
     step.stepFiles.forEach(f => { if (!contextFiles.some(k => k.name === f.name)) contextFiles.push(f); });
@@ -499,7 +812,7 @@ export default function AgentOrchestrator() {
     }
 
     try {
-      const result = await callAI(
+      const result = await callAIStream(
         apiKeys,
         agent.model,
         systemPrompt,
@@ -509,7 +822,10 @@ export default function AgentOrchestrator() {
         currentFiles,
         formatGlobalMemory(),
         guardrailsEnabled,
-        guardrailOverride
+        guardrailOverride,
+        (chunk, fullText) => {
+          setStreamingText(fullText);
+        }
       );
 
       // Check if blocked by guardrails
@@ -522,11 +838,13 @@ export default function AgentOrchestrator() {
         setChatInput(userMessage);
         setChatFiles(currentFiles);
         setIsProcessingStep(false);
+        setIsStreaming(false);
         return;
       }
 
       const outputText = typeof result === 'string' ? result : JSON.stringify(result);
       setCurrentStepOutput(outputText);
+      setStreamingText("");
 
       let historyText = userMessage;
       if (currentFiles.length > 0) historyText += `\n[Attached ${currentFiles.length} file(s)]`;
@@ -538,13 +856,18 @@ export default function AgentOrchestrator() {
       ]);
 
       addToGlobalMemory(agent.name, activeStepIndex + 1, userMessage, outputText);
+      generateAgentSuggestions(outputText); // Generate suggestions based on output
       setIsProcessingStep(false);
+      setIsStreaming(false);
       setGuardrailOverride(false);
     } catch (err) {
+      // Enhanced error handling with suggestions
+      const errorInfo = err.parsed || { originalError: err.message, suggestions: [{ type: 'unknown', message: err.message, fix: 'Please try again' }] };
+      setErrorWithSuggestions(errorInfo);
       setIsProcessingStep(false);
+      setIsStreaming(false);
       setChatInput(userMessage);
       setChatFiles(currentFiles);
-      setGenericAlert({ title: "Interaction Failed", message: err.message });
     }
   };
 
