@@ -1,7 +1,7 @@
 /**
  * Guardrails Service
  * Provides content safety checks to prevent jailbreaking and misuse
- * V35: Added expandable view and toggleable enforcement
+ * V36: Added expandable view and toggleable enforcement
  */
 
 // Categories of potentially harmful content (hard guardrails - cannot be overridden by default)
