@@ -109,12 +109,13 @@ export const MODELS = {
   ],
 
   // ========== OPENAI MODELS ==========
-  // Ref: https://platform.openai.com/docs/models
+  // Ref: https://platform.openai.com/docs/models & https://platform.openai.com/docs/pricing
   openai: [
+    // GPT-4.1 Family - Smartest non-reasoning models (April 2025)
     {
       id: 'gpt-4.1',
       name: 'GPT-4.1',
-      description: 'Latest flagship - Major gains in coding & instruction following',
+      description: 'Smartest non-reasoning model - Excels at coding & instruction following',
       tier: 'flagship',
       contextWindow: '1M tokens',
       provider: 'openai',
@@ -123,7 +124,7 @@ export const MODELS = {
     {
       id: 'gpt-4.1-mini',
       name: 'GPT-4.1 Mini',
-      description: 'Fast & affordable with 1M context',
+      description: 'Beats GPT-4o at 83% lower cost - Great for text & vision',
       tier: 'standard',
       contextWindow: '1M tokens',
       provider: 'openai',
@@ -132,16 +133,17 @@ export const MODELS = {
     {
       id: 'gpt-4.1-nano',
       name: 'GPT-4.1 Nano',
-      description: 'Smallest & fastest in 4.1 family',
+      description: 'Fastest & cheapest - Best for classification & autocomplete',
       tier: 'lite',
       contextWindow: '1M tokens',
       provider: 'openai',
       isNew: true
     },
+    // O-series Reasoning Models
     {
       id: 'o3',
       name: 'o3',
-      description: 'Best for PhD-level scientific reasoning',
+      description: 'Powerful reasoning - Coding, math, science & visual perception',
       tier: 'flagship',
       contextWindow: '200K tokens',
       provider: 'openai'
@@ -157,7 +159,7 @@ export const MODELS = {
     {
       id: 'o4-mini',
       name: 'o4-mini',
-      description: 'Fast, cost-efficient reasoning - Best on AIME',
+      description: 'Fast, cost-efficient reasoning model',
       tier: 'standard',
       contextWindow: '200K tokens',
       provider: 'openai',
@@ -166,15 +168,24 @@ export const MODELS = {
     {
       id: 'o3-mini',
       name: 'o3-mini',
-      description: 'Best for fast advanced reasoning',
+      description: 'Small reasoning alternative to o3 - 100K max output',
       tier: 'standard',
       contextWindow: '200K tokens',
       provider: 'openai'
     },
     {
+      id: 'o1',
+      name: 'o1',
+      description: 'Previous full o-series reasoning model',
+      tier: 'standard',
+      contextWindow: '200K tokens',
+      provider: 'openai'
+    },
+    // GPT-4o Family - Legacy but still available
+    {
       id: 'gpt-4o',
       name: 'GPT-4o',
-      description: 'Multimodal understanding (legacy)',
+      description: 'Multimodal flagship - Text & image (legacy)',
       tier: 'standard',
       contextWindow: '128K tokens',
       provider: 'openai',
@@ -183,7 +194,7 @@ export const MODELS = {
     {
       id: 'gpt-4o-mini',
       name: 'GPT-4o Mini',
-      description: 'Fast & affordable (legacy)',
+      description: 'Fast & affordable multimodal (legacy)',
       tier: 'lite',
       contextWindow: '128K tokens',
       provider: 'openai',
