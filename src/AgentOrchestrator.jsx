@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Bot, Play, Plus, Trash2, Layers, X,
   Maximize2, Loader2, HardDrive,
@@ -6,7 +6,9 @@ import {
   Send, ArrowRight, FileText,
   Download, History, Rewind, GitCommit,
   AlertTriangle, Database, Shield, ShieldOff,
-  BookOpen, Sparkles, Key, Check
+  BookOpen, Sparkles, Key, Check, Copy,
+  RefreshCw, Edit3, GitBranch, Zap, BarChart3,
+  ExternalLink, Share2, Expand, Lightbulb
 } from 'lucide-react';
 
 // Import components
@@ -16,8 +18,23 @@ import SimpleMarkdown from './components/ui/SimpleMarkdown';
 
 // Import services
 import dbCore from './services/database';
-import { callAI, getProviderFromModel } from './services/api';
-import { checkGuardrails, getGuardrailSystemPrompt } from './services/guardrails';
+import {
+  callAI,
+  callAIStream,
+  callMultipleModels,
+  getProviderFromModel,
+  estimateTokens,
+  getContextWindowSize,
+  estimateCost,
+  recommendModel
+} from './services/api';
+import {
+  checkGuardrails,
+  getGuardrailSystemPrompt,
+  getGuardrailCategories,
+  getDefaultGuardrailSettings,
+  getSeverityColor
+} from './services/guardrails';
 
 // Import data
 import { DEFAULT_AGENTS, DEFAULT_WORKFLOW } from './data/defaultKnowledgeBases';
@@ -37,7 +54,8 @@ export default function AgentOrchestrator() {
   const [apiKeys, setApiKeys] = useState({
     gemini: "",
     openai: "",
-    anthropic: ""
+    anthropic: "",
+    xai: ""
   });
   const [showApiKeys, setShowApiKeys] = useState(false);
 
@@ -67,6 +85,8 @@ export default function AgentOrchestrator() {
   const [guardrailsEnabled, setGuardrailsEnabled] = useState(true);
   const [guardrailOverride, setGuardrailOverride] = useState(false);
   const [guardrailWarning, setGuardrailWarning] = useState(null);
+  const [guardrailSettings, setGuardrailSettings] = useState(getDefaultGuardrailSettings());
+  const [showGuardrailsPanel, setShowGuardrailsPanel] = useState(false);
 
   // UI State
   const [activeTab, setActiveTab] = useState("run");
@@ -88,6 +108,39 @@ export default function AgentOrchestrator() {
   const [genericAlert, setGenericAlert] = useState(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
 
+  // NEW: Streaming & Enhanced UX State
+  const [streamingText, setStreamingText] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+
+  // NEW: Message editing
+  const [editingMessageIndex, setEditingMessageIndex] = useState(null);
+  const [editedMessageText, setEditedMessageText] = useState("");
+
+  // NEW: Conversation branching
+  const [conversationBranches, setConversationBranches] = useState([]);
+  const [currentBranchId, setCurrentBranchId] = useState("main");
+
+  // NEW: Model recommendations
+  const [modelRecommendations, setModelRecommendations] = useState([]);
+  const [showRecommendations, setShowRecommendations] = useState(false);
+  const [originalAgentModel, setOriginalAgentModel] = useState(null); // Tracks default model when suggestion is selected
+
+  // NEW: Multi-model comparison
+  const [compareModelsEnabled, setCompareModelsEnabled] = useState(false);
+  const [selectedCompareModels, setSelectedCompareModels] = useState([]);
+  const [comparisonResults, setComparisonResults] = useState([]);
+  const [isComparing, setIsComparing] = useState(false);
+  const [showComparisonModal, setShowComparisonModal] = useState(false);
+
+  // NEW: Agent suggestions
+  const [suggestedAgents, setSuggestedAgents] = useState([]);
+
+  // NEW: Expanded message view
+  const [expandedMessageIndex, setExpandedMessageIndex] = useState(null);
+
+  // NEW: Error with suggestions
+  const [errorWithSuggestions, setErrorWithSuggestions] = useState(null);
+
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
 
@@ -96,7 +149,48 @@ export default function AgentOrchestrator() {
     if (chatEndRef.current) {
       chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [stepHistory, isProcessingStep]);
+  }, [stepHistory, isProcessingStep, streamingText]);
+
+  // --- TOKEN ESTIMATION ---
+  const tokenEstimate = useMemo(() => {
+    if (!chatInput && chatFiles.length === 0) return null;
+
+    const step = workflow[activeStepIndex];
+    const agent = step ? agents.find(a => a.id === step.agentId) : null;
+    if (!agent) return null;
+
+    // Estimate input tokens
+    let totalText = chatInput;
+    chatFiles.forEach(f => { totalText += f.content || ''; });
+
+    // Add context from knowledge base
+    agent.knowledge.forEach(k => { totalText += k.content || ''; });
+
+    // Add global memory
+    const memoryText = globalConversationMemory.map(e => e.agentResponse).join('');
+    totalText += memoryText;
+
+    const inputTokens = estimateTokens(totalText);
+    const contextWindow = getContextWindowSize(agent.model);
+    const cost = estimateCost(agent.model, inputTokens, 2000); // Assume ~2000 output tokens
+
+    return {
+      inputTokens,
+      contextWindow,
+      percentUsed: Math.min(100, (inputTokens / contextWindow) * 100),
+      estimatedCost: cost.totalCost
+    };
+  }, [chatInput, chatFiles, activeStepIndex, workflow, agents, globalConversationMemory]);
+
+  // --- MODEL RECOMMENDATIONS ---
+  useEffect(() => {
+    if (chatInput.length > 10) {
+      const recommendations = recommendModel(chatInput, apiKeys);
+      setModelRecommendations(recommendations);
+    } else {
+      setModelRecommendations([]);
+    }
+  }, [chatInput, apiKeys]);
 
   // --- PERSISTENCE: LOAD ---
   useEffect(() => {
@@ -108,6 +202,7 @@ export default function AgentOrchestrator() {
         const w = await dbCore.load('workflow');
         const fm = await dbCore.load('isFreeMode');
         const ge = await dbCore.load('guardrailsEnabled');
+        const gs = await dbCore.load('guardrailSettings');
         const runs = await dbCore.loadAllRuns();
 
         if (mounted) {
@@ -120,6 +215,7 @@ export default function AgentOrchestrator() {
           if (w?.length) setWorkflow(w); else setWorkflow(DEFAULT_WORKFLOW);
           if (fm !== undefined) setIsFreeMode(fm);
           if (ge !== undefined) setGuardrailsEnabled(ge);
+          if (gs) setGuardrailSettings(gs);
           if (runs) setSavedRuns(runs.sort((a, b) => b.timestamp - a.timestamp));
           setIsLoaded(true);
         }
@@ -142,11 +238,12 @@ export default function AgentOrchestrator() {
       await dbCore.save('workflow', workflow);
       await dbCore.save('isFreeMode', isFreeMode);
       await dbCore.save('guardrailsEnabled', guardrailsEnabled);
+      await dbCore.save('guardrailSettings', guardrailSettings);
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2000);
     }, 2000);
     return () => clearTimeout(t);
-  }, [apiKeys, agents, workflow, isFreeMode, guardrailsEnabled, isLoaded]);
+  }, [apiKeys, agents, workflow, isFreeMode, guardrailsEnabled, guardrailSettings, isLoaded]);
 
   // --- HISTORY MANAGEMENT ---
   const saveCurrentRun = async () => {
@@ -236,7 +333,7 @@ export default function AgentOrchestrator() {
 
   // --- AGENT GENERATOR ---
   const handleGenerateAgent = async () => {
-    if (!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic) {
+    if (!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic && !apiKeys.xai) {
       setGenericAlert({ title: "API Key Required", message: "Please enter at least one API key first." });
       return;
     }
@@ -255,7 +352,7 @@ export default function AgentOrchestrator() {
 
     try {
       // Use available API key
-      const modelToUse = apiKeys.gemini ? "gemini-2.5-flash" : apiKeys.openai ? "gpt-4o-mini" : "claude-3-5-haiku-20241022";
+      const modelToUse = apiKeys.gemini ? "gemini-2.5-flash" : apiKeys.openai ? "gpt-4o-mini" : apiKeys.anthropic ? "claude-3-5-haiku-20241022" : "grok-3-mini";
       const result = await callAI(apiKeys, modelToUse, "You are an agent generator.", metaPrompt, [], [], [], "", false, true);
 
       const cleanJson = result.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -352,10 +449,214 @@ export default function AgentOrchestrator() {
     return !!apiKeys[provider];
   };
 
+  // --- NEW: MESSAGE EDITING & REGENERATION ---
+  const handleEditMessage = (index) => {
+    const msg = stepHistory[index];
+    if (msg.role === 'user') {
+      setEditingMessageIndex(index);
+      setEditedMessageText(msg.parts[0].text);
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (editingMessageIndex === null) return;
+
+    // Create a branch point
+    const branchId = `branch-${Date.now()}`;
+    setConversationBranches(prev => [...prev, {
+      id: branchId,
+      parentBranch: currentBranchId,
+      branchPoint: editingMessageIndex,
+      history: [...stepHistory]
+    }]);
+
+    // Truncate history to edit point and set new message
+    const newHistory = stepHistory.slice(0, editingMessageIndex);
+    newHistory.push({ role: 'user', parts: [{ text: editedMessageText }] });
+    setStepHistory(newHistory);
+    setCurrentBranchId(branchId);
+    setEditingMessageIndex(null);
+    setEditedMessageText("");
+
+    // Regenerate response
+    setChatInput(editedMessageText);
+    await handleAgentInteraction();
+  };
+
+  const handleRegenerateResponse = async (messageIndex) => {
+    // Find the user message before this response
+    const userMsgIndex = messageIndex - 1;
+    if (userMsgIndex < 0 || stepHistory[userMsgIndex].role !== 'user') return;
+
+    // Truncate history to before the response
+    const newHistory = stepHistory.slice(0, messageIndex);
+    setStepHistory(newHistory);
+
+    // Re-run with same user message
+    const userMessage = stepHistory[userMsgIndex].parts[0].text;
+    setChatInput(userMessage);
+    await handleAgentInteraction();
+  };
+
+  // --- NEW: CONVERSATION BRANCHING ---
+  const handleCreateBranch = (atIndex) => {
+    const branchId = `branch-${Date.now()}`;
+    setConversationBranches(prev => [...prev, {
+      id: branchId,
+      parentBranch: currentBranchId,
+      branchPoint: atIndex,
+      history: [...stepHistory],
+      timestamp: Date.now()
+    }]);
+
+    // Start new branch from this point
+    setStepHistory(stepHistory.slice(0, atIndex + 1));
+    setCurrentBranchId(branchId);
+  };
+
+  const handleSwitchBranch = (branchId) => {
+    const branch = conversationBranches.find(b => b.id === branchId);
+    if (branch) {
+      setStepHistory([...branch.history]);
+      setCurrentBranchId(branchId);
+    }
+  };
+
+  // --- NEW: MULTI-MODEL COMPARISON ---
+  const handleCompareModels = async () => {
+    if (selectedCompareModels.length < 2) {
+      setGenericAlert({ title: "Select Models", message: "Please select at least 2 models to compare." });
+      return;
+    }
+
+    setIsComparing(true);
+    setComparisonResults([]);
+
+    const step = workflow[activeStepIndex];
+    const agent = agents.find(a => a.id === step.agentId);
+    const contextFiles = [...agent.knowledge];
+
+    let systemPrompt = agent.prompt;
+    if (guardrailsEnabled) {
+      systemPrompt += "\n\n" + getGuardrailSystemPrompt();
+    }
+
+    try {
+      const results = await callMultipleModels(
+        apiKeys,
+        selectedCompareModels,
+        systemPrompt,
+        chatInput,
+        contextFiles,
+        [],
+        chatFiles,
+        formatGlobalMemory(),
+        (model, status, index, result) => {
+          // Update progress
+          setComparisonResults(prev => {
+            const updated = [...prev];
+            updated[index] = { model, status, result: status === 'complete' ? result : null };
+            return updated;
+          });
+        }
+      );
+
+      setComparisonResults(results);
+      setShowComparisonModal(true);
+    } catch (err) {
+      setGenericAlert({ title: "Comparison Failed", message: err.message });
+    } finally {
+      setIsComparing(false);
+    }
+  };
+
+  const handleSelectComparisonResult = (result) => {
+    // Use this result as the response
+    setCurrentStepOutput(result.result);
+    setStepHistory(prev => [
+      ...prev,
+      { role: 'user', parts: [{ text: chatInput }] },
+      { role: 'model', parts: [{ text: result.result }], model: result.model }
+    ]);
+    addToGlobalMemory(agents.find(a => a.id === workflow[activeStepIndex].agentId)?.name, activeStepIndex + 1, chatInput, result.result);
+    setChatInput("");
+    setChatFiles([]);
+    setShowComparisonModal(false);
+    setCompareModelsEnabled(false);
+    setSelectedCompareModels([]);
+  };
+
+  // --- NEW: AGENT SUGGESTIONS ---
+  const generateAgentSuggestions = (currentOutput) => {
+    const suggestions = [];
+    const output = currentOutput.toLowerCase();
+
+    agents.forEach(agent => {
+      const agentPrompt = agent.prompt.toLowerCase();
+      let score = 0;
+      let reason = "";
+
+      // Check if output mentions tasks this agent could help with
+      if (output.includes('code') && agentPrompt.includes('code')) {
+        score += 3;
+        reason = "Can help with code mentioned in output";
+      }
+      if (output.includes('review') && agentPrompt.includes('review')) {
+        score += 3;
+        reason = "Can review the generated content";
+      }
+      if (output.includes('edit') && agentPrompt.includes('edit')) {
+        score += 3;
+        reason = "Can edit and refine the content";
+      }
+      if (output.includes('research') && agentPrompt.includes('research')) {
+        score += 2;
+        reason = "Can help research further";
+      }
+      if ((output.includes('next step') || output.includes('todo')) && agentPrompt.includes('plan')) {
+        score += 2;
+        reason = "Can help plan next steps";
+      }
+
+      if (score > 0) {
+        suggestions.push({ agent, score, reason });
+      }
+    });
+
+    // Sort by score and take top 3
+    suggestions.sort((a, b) => b.score - a.score);
+    setSuggestedAgents(suggestions.slice(0, 3));
+  };
+
+  // --- NEW: COPY/SHARE RESPONSE ---
+  const handleCopyResponse = async (text, id) => {
+    const success = await copyToClipboard(text);
+    if (success) {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    }
+  };
+
+  const handleShareResponse = async (text) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Agent Response',
+          text: text.substring(0, 500) + '...'
+        });
+      } catch (err) {
+        // User cancelled or error
+      }
+    } else {
+      // Fallback to copy
+      handleCopyResponse(text, 'share');
+    }
+  };
+
   // --- ENGINE: INIT & START ---
   const startPipeline = async () => {
     // Check if we have any API key
-    if (!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic) {
+    if (!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic && !apiKeys.xai) {
       return setLogs([{ step: 0, agentName: "System", status: "error", output: "Missing API Key. Please add at least one API key." }]);
     }
 
@@ -390,10 +691,13 @@ export default function AgentOrchestrator() {
     setExecutionState("interacting");
   };
 
-  // --- ENGINE: EXECUTE (LLM CALL) ---
+  // --- ENGINE: EXECUTE (LLM CALL) - WITH STREAMING ---
   const executeStep = async (index, userPrompt) => {
     setIsProcessingStep(true);
+    setIsStreaming(true);
+    setStreamingText("");
     setGuardrailWarning(null);
+    setErrorWithSuggestions(null);
 
     const step = workflow[index];
     const agent = agents.find(a => a.id === step.agentId);
@@ -405,6 +709,7 @@ export default function AgentOrchestrator() {
         message: `No API key configured for ${getProviderFromModel(agent.model).toUpperCase()}. Please add the API key in settings.`
       });
       setIsProcessingStep(false);
+      setIsStreaming(false);
       return;
     }
 
@@ -424,7 +729,7 @@ export default function AgentOrchestrator() {
     }
 
     try {
-      const result = await callAI(
+      const result = await callAIStream(
         apiKeys,
         agent.model,
         systemPrompt,
@@ -434,7 +739,12 @@ export default function AgentOrchestrator() {
         chatFiles,
         formatGlobalMemory(),
         guardrailsEnabled,
-        guardrailOverride
+        guardrailOverride,
+        (chunk, fullText) => {
+          // Stream callback - update UI in real-time
+          setStreamingText(fullText);
+        },
+        guardrailSettings
       );
 
       // Check if blocked by guardrails
@@ -442,32 +752,50 @@ export default function AgentOrchestrator() {
         setGuardrailWarning({
           reason: result.reason,
           category: result.category,
+          categoryId: result.categoryId,
+          icon: result.icon,
+          severity: result.severity,
+          matchedText: result.matchedText,
           canOverride: result.canOverride
         });
         setIsProcessingStep(false);
+        setIsStreaming(false);
         return;
       }
 
       const outputText = typeof result === 'string' ? result : JSON.stringify(result);
       setCurrentStepOutput(outputText);
+      setStreamingText("");
       setStepHistory([{ role: 'user', parts: [{ text: fullPrompt }] }, { role: 'model', parts: [{ text: outputText }] }]);
       addToGlobalMemory(agent.name, index + 1, userPrompt, outputText);
+      generateAgentSuggestions(outputText); // Generate suggestions based on output
       setIsProcessingStep(false);
+      setIsStreaming(false);
       setChatInput("");
       setChatFiles([]);
       setGuardrailOverride(false);
       setExecutionState("interacting");
     } catch (err) {
+      // Enhanced error handling with suggestions
+      const errorInfo = err.parsed || { originalError: err.message, suggestions: [{ type: 'unknown', message: err.message, fix: 'Please try again' }] };
+      setErrorWithSuggestions(errorInfo);
       setLogs(prev => [...prev, { step: index + 1, agentName: agent.name, status: "error", output: err.message }]);
       setStepHistory(prev => [...prev, { role: 'model', parts: [{ text: `**System Error:** ${err.message}` }] }]);
       setExecutionState("interacting");
       setIsProcessingStep(false);
+      setIsStreaming(false);
     }
   };
 
-  // --- ENGINE: INTERACTION LOOP ---
+  // --- ENGINE: INTERACTION LOOP - WITH STREAMING ---
   const handleAgentInteraction = async () => {
     if (activeStepIndex === null) return;
+
+    // If compare mode is enabled, run comparison instead
+    if (compareModelsEnabled && selectedCompareModels.length >= 2) {
+      await handleCompareModels();
+      return;
+    }
 
     // Initial Run Trigger
     if (stepHistory.length === 0) {
@@ -486,7 +814,10 @@ export default function AgentOrchestrator() {
     setChatInput("");
     setChatFiles([]);
     setIsProcessingStep(true);
+    setIsStreaming(true);
+    setStreamingText("");
     setGuardrailWarning(null);
+    setErrorWithSuggestions(null);
 
     const contextFiles = [...agent.knowledge];
     step.stepFiles.forEach(f => { if (!contextFiles.some(k => k.name === f.name)) contextFiles.push(f); });
@@ -498,7 +829,7 @@ export default function AgentOrchestrator() {
     }
 
     try {
-      const result = await callAI(
+      const result = await callAIStream(
         apiKeys,
         agent.model,
         systemPrompt,
@@ -508,7 +839,11 @@ export default function AgentOrchestrator() {
         currentFiles,
         formatGlobalMemory(),
         guardrailsEnabled,
-        guardrailOverride
+        guardrailOverride,
+        (chunk, fullText) => {
+          setStreamingText(fullText);
+        },
+        guardrailSettings
       );
 
       // Check if blocked by guardrails
@@ -516,16 +851,22 @@ export default function AgentOrchestrator() {
         setGuardrailWarning({
           reason: result.reason,
           category: result.category,
+          categoryId: result.categoryId,
+          icon: result.icon,
+          severity: result.severity,
+          matchedText: result.matchedText,
           canOverride: result.canOverride
         });
         setChatInput(userMessage);
         setChatFiles(currentFiles);
         setIsProcessingStep(false);
+        setIsStreaming(false);
         return;
       }
 
       const outputText = typeof result === 'string' ? result : JSON.stringify(result);
       setCurrentStepOutput(outputText);
+      setStreamingText("");
 
       let historyText = userMessage;
       if (currentFiles.length > 0) historyText += `\n[Attached ${currentFiles.length} file(s)]`;
@@ -537,13 +878,18 @@ export default function AgentOrchestrator() {
       ]);
 
       addToGlobalMemory(agent.name, activeStepIndex + 1, userMessage, outputText);
+      generateAgentSuggestions(outputText); // Generate suggestions based on output
       setIsProcessingStep(false);
+      setIsStreaming(false);
       setGuardrailOverride(false);
     } catch (err) {
+      // Enhanced error handling with suggestions
+      const errorInfo = err.parsed || { originalError: err.message, suggestions: [{ type: 'unknown', message: err.message, fix: 'Please try again' }] };
+      setErrorWithSuggestions(errorInfo);
       setIsProcessingStep(false);
+      setIsStreaming(false);
       setChatInput(userMessage);
       setChatFiles(currentFiles);
-      setGenericAlert({ title: "Interaction Failed", message: err.message });
     }
   };
 
@@ -768,6 +1114,21 @@ export default function AgentOrchestrator() {
                   placeholder="sk-ant-..."
                 />
               </div>
+
+              {/* xAI Grok */}
+              <div>
+                <label className="text-[10px] font-bold text-purple-600 flex items-center gap-1">
+                  ⚡ xAI Grok
+                  {apiKeys.xai && <Check className="w-3 h-3 text-green-500" />}
+                </label>
+                <input
+                  type="password"
+                  value={apiKeys.xai}
+                  onChange={e => setApiKeys(prev => ({ ...prev, xai: e.target.value }))}
+                  className="w-full mt-1 p-2 text-xs border rounded focus:ring-2 focus:ring-purple-500 outline-none"
+                  placeholder="xai-..."
+                />
+              </div>
             </div>
           )}
         </div>
@@ -788,17 +1149,101 @@ export default function AgentOrchestrator() {
             </div>
           </label>
 
-          {/* Guardrails Toggle */}
-          <label className={`flex items-center gap-2 cursor-pointer p-2 rounded border ${guardrailsEnabled ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-            <input type="checkbox" checked={guardrailsEnabled} onChange={e => setGuardrailsEnabled(e.target.checked)} className="rounded text-green-600 focus:ring-green-500" />
-            <div className="flex flex-col">
-              <span className="font-bold text-gray-800 flex items-center gap-1">
-                {guardrailsEnabled ? <Shield className="w-3 h-3 text-green-600" /> : <ShieldOff className="w-3 h-3 text-red-600" />}
-                Safety Guardrails
-              </span>
-              <span className="text-[10px] text-gray-500">{guardrailsEnabled ? 'Protection enabled' : 'Protection disabled'}</span>
+          {/* Guardrails Toggle with Expandable Panel */}
+          <div className={`rounded border ${guardrailsEnabled ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+            <div className="flex items-center gap-2 p-2">
+              <input
+                type="checkbox"
+                checked={guardrailsEnabled}
+                onChange={e => setGuardrailsEnabled(e.target.checked)}
+                className="rounded text-green-600 focus:ring-green-500"
+              />
+              <div className="flex-1 cursor-pointer" onClick={() => setShowGuardrailsPanel(!showGuardrailsPanel)}>
+                <span className="font-bold text-gray-800 flex items-center gap-1">
+                  {guardrailsEnabled ? <Shield className="w-3 h-3 text-green-600" /> : <ShieldOff className="w-3 h-3 text-red-600" />}
+                  Safety Guardrails
+                </span>
+                <span className="text-[10px] text-gray-500">{guardrailsEnabled ? 'Click to configure' : 'Protection disabled'}</span>
+              </div>
+              <button
+                onClick={() => setShowGuardrailsPanel(!showGuardrailsPanel)}
+                className="p-1 hover:bg-green-100 rounded"
+              >
+                {showGuardrailsPanel ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              </button>
             </div>
-          </label>
+
+            {/* Expandable Guardrails Configuration Panel */}
+            {showGuardrailsPanel && guardrailsEnabled && (
+              <div className="border-t border-green-200 p-2 space-y-3 max-h-64 overflow-y-auto">
+                {/* Hard Guardrails */}
+                <div>
+                  <h4 className="text-[10px] font-bold text-gray-600 uppercase mb-2">Core Safety (Cannot Disable)</h4>
+                  {getGuardrailCategories().hardGuardrails.filter(g => !g.canDisable).map(guardrail => {
+                    const colors = getSeverityColor(guardrail.severity);
+                    return (
+                      <div key={guardrail.id} className={`p-2 mb-1 rounded ${colors.bg} ${colors.border} border`}>
+                        <div className="flex items-center gap-2">
+                          <span>{guardrail.icon}</span>
+                          <span className={`font-medium text-[11px] ${colors.text}`}>{guardrail.name}</span>
+                          <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded ${colors.bg} ${colors.text} border ${colors.border}`}>
+                            {guardrail.severity}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-gray-600 mt-1">{guardrail.description}</p>
+                        <div className="text-[9px] text-gray-500 mt-1">
+                          Examples: {guardrail.examples.slice(0, 2).join(', ')}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Configurable Guardrails */}
+                <div>
+                  <h4 className="text-[10px] font-bold text-gray-600 uppercase mb-2">Configurable Protection</h4>
+                  {[...getGuardrailCategories().hardGuardrails.filter(g => g.canDisable), ...getGuardrailCategories().softGuardrails].map(guardrail => {
+                    const colors = getSeverityColor(guardrail.severity);
+                    const isEnabled = guardrailSettings[guardrail.id]?.enabled !== false;
+                    return (
+                      <div key={guardrail.id} className={`p-2 mb-1 rounded border ${isEnabled ? colors.bg + ' ' + colors.border : 'bg-gray-100 border-gray-200'}`}>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={(e) => {
+                              setGuardrailSettings(prev => ({
+                                ...prev,
+                                [guardrail.id]: { ...prev[guardrail.id], enabled: e.target.checked }
+                              }));
+                            }}
+                            className="rounded text-green-600 focus:ring-green-500"
+                          />
+                          <span>{guardrail.icon}</span>
+                          <span className={`font-medium text-[11px] ${isEnabled ? colors.text : 'text-gray-500'}`}>{guardrail.name}</span>
+                          <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded ${isEnabled ? colors.bg + ' ' + colors.text + ' border ' + colors.border : 'bg-gray-200 text-gray-500'}`}>
+                            {guardrail.severity}
+                          </span>
+                        </div>
+                        <p className={`text-[10px] mt-1 ${isEnabled ? 'text-gray-600' : 'text-gray-400'}`}>{guardrail.description}</p>
+                        <div className={`text-[9px] mt-1 ${isEnabled ? 'text-gray-500' : 'text-gray-400'}`}>
+                          Examples: {guardrail.examples.slice(0, 2).join(', ')}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Reset Button */}
+                <button
+                  onClick={() => setGuardrailSettings(getDefaultGuardrailSettings())}
+                  className="w-full text-[10px] text-gray-500 hover:text-gray-700 py-1 border-t border-green-200 mt-2"
+                >
+                  Reset to Defaults
+                </button>
+              </div>
+            )}
+          </div>
 
           {globalConversationMemory.length > 0 && (
             <button
@@ -903,10 +1348,10 @@ export default function AgentOrchestrator() {
                     className="w-full p-4 border rounded-lg h-32 resize-none focus:ring-2 focus:ring-indigo-500 outline-none text-lg"
                     placeholder="Enter your initial goal or project context..."
                   />
-                  <Button onClick={startPipeline} className="w-full h-14 text-lg" disabled={!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic}>
+                  <Button onClick={startPipeline} className="w-full h-14 text-lg" disabled={!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic && !apiKeys.xai}>
                     Begin Session <ArrowRight className="w-5 h-5" />
                   </Button>
-                  {!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic && (
+                  {!apiKeys.gemini && !apiKeys.openai && !apiKeys.anthropic && !apiKeys.xai && (
                     <p className="text-center text-red-500 text-sm">Please add at least one API key to start</p>
                   )}
                 </div>
@@ -1027,21 +1472,70 @@ export default function AgentOrchestrator() {
 
                 {/* MAIN CHAT AREA */}
                 <div className="flex-1 flex flex-col h-full overflow-hidden bg-white">
-                  {/* Header */}
-                  <div className="bg-white border-b px-6 py-3 flex justify-between items-center shadow-sm z-10 h-16">
-                    <div>
-                      <h2 className="text-lg font-bold flex items-center gap-2 text-gray-800">
-                        {agents.find(a => a.id === workflow[activeStepIndex].agentId)?.name}
-                        <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 text-xs font-normal border">
-                          Step {activeStepIndex + 1}
-                        </span>
-                      </h2>
+                  {/* Header with Progress Bar */}
+                  <div className="bg-white border-b shadow-sm z-10">
+                    <div className="px-6 py-3 flex justify-between items-center h-16">
+                      <div>
+                        <h2 className="text-lg font-bold flex items-center gap-2 text-gray-800">
+                          {agents.find(a => a.id === workflow[activeStepIndex].agentId)?.name}
+                          <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 text-xs font-normal border">
+                            Step {activeStepIndex + 1} of {workflow.length}
+                          </span>
+                        </h2>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button variant="secondary" className="text-xs h-8" onClick={() => { setExecutionState('idle'); setLogs([]); setPipelineFiles([]); setActiveStepIndex(null); }}>
+                          Cancel Session
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <Button variant="secondary" className="text-xs h-8" onClick={() => { setExecutionState('idle'); setLogs([]); setPipelineFiles([]); setActiveStepIndex(null); }}>
-                        Cancel Session
-                      </Button>
-                    </div>
+
+                    {/* Visual Progress Bar */}
+                    {!isFreeMode && workflow.length > 1 && (
+                      <div className="px-6 pb-3">
+                        <div className="flex items-center gap-1">
+                          {workflow.map((step, idx) => {
+                            const stepAgent = agents.find(a => a.id === step.agentId);
+                            const isComplete = idx < activeStepIndex;
+                            const isCurrent = idx === activeStepIndex;
+                            const isPending = idx > activeStepIndex;
+
+                            return (
+                              <React.Fragment key={step.id}>
+                                {idx > 0 && (
+                                  <div className={`flex-1 h-0.5 ${isComplete ? 'bg-green-500' : 'bg-gray-200'}`} />
+                                )}
+                                <div
+                                  className={`flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold transition-all ${
+                                    isComplete ? 'bg-green-500 text-white' :
+                                    isCurrent ? 'bg-indigo-600 text-white ring-4 ring-indigo-100' :
+                                    'bg-gray-200 text-gray-500'
+                                  }`}
+                                  title={stepAgent?.name}
+                                >
+                                  {isComplete ? <Check className="w-4 h-4" /> : idx + 1}
+                                </div>
+                              </React.Fragment>
+                            );
+                          })}
+                        </div>
+                        <div className="flex justify-between mt-1">
+                          {workflow.map((step, idx) => {
+                            const stepAgent = agents.find(a => a.id === step.agentId);
+                            return (
+                              <div
+                                key={step.id}
+                                className={`text-[10px] truncate max-w-[80px] text-center ${
+                                  idx === activeStepIndex ? 'text-indigo-600 font-medium' : 'text-gray-400'
+                                }`}
+                              >
+                                {stepAgent?.name}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Chat History */}
@@ -1055,35 +1549,198 @@ export default function AgentOrchestrator() {
                     )}
 
                     {stepHistory.map((msg, idx) => (
-                      <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-3xl rounded-xl p-4 shadow-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border text-gray-800'}`}>
-                          <div className={`text-[10px] mb-1 font-bold uppercase tracking-wider ${msg.role === 'user' ? 'text-indigo-200' : 'text-gray-400'}`}>{msg.role === 'model' ? 'Agent' : 'You'}</div>
-                          <div className="prose prose-sm max-w-none dark:prose-invert">
-                            <SimpleMarkdown>{msg.parts[0].text}</SimpleMarkdown>
+                      <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group`}>
+                        <div className={`max-w-3xl rounded-xl p-4 shadow-sm relative ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border text-gray-800'}`}>
+                          {/* Message header with actions */}
+                          <div className="flex items-center justify-between mb-1">
+                            <div className={`text-[10px] font-bold uppercase tracking-wider ${msg.role === 'user' ? 'text-indigo-200' : 'text-gray-400'}`}>
+                              {msg.role === 'model' ? 'Agent' : 'You'}
+                              {msg.model && <span className="ml-2 font-normal">({getModelById(msg.model)?.name || msg.model})</span>}
+                            </div>
+                            {/* Message Actions */}
+                            <div className={`flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ${msg.role === 'user' ? 'text-indigo-200' : 'text-gray-400'}`}>
+                              {msg.role === 'user' && (
+                                <button
+                                  onClick={() => handleEditMessage(idx)}
+                                  className="p-1 hover:bg-white/10 rounded"
+                                  title="Edit message"
+                                >
+                                  <Edit3 className="w-3 h-3" />
+                                </button>
+                              )}
+                              {msg.role === 'model' && (
+                                <>
+                                  <button
+                                    onClick={() => handleRegenerateResponse(idx)}
+                                    className="p-1 hover:bg-gray-100 rounded"
+                                    title="Regenerate response"
+                                  >
+                                    <RefreshCw className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleCreateBranch(idx)}
+                                    className="p-1 hover:bg-gray-100 rounded"
+                                    title="Create branch from here"
+                                  >
+                                    <GitBranch className="w-3 h-3" />
+                                  </button>
+                                </>
+                              )}
+                              <button
+                                onClick={() => handleCopyResponse(msg.parts[0].text, `msg-${idx}`)}
+                                className={`p-1 rounded ${msg.role === 'user' ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}
+                                title="Copy"
+                              >
+                                {copiedId === `msg-${idx}` ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                              </button>
+                              {msg.role === 'model' && (
+                                <>
+                                  <button
+                                    onClick={() => downloadFile(`response-${idx}.md`, msg.parts[0].text, 'text/markdown')}
+                                    className="p-1 hover:bg-gray-100 rounded"
+                                    title="Download"
+                                  >
+                                    <Download className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    onClick={() => setExpandedMessageIndex(expandedMessageIndex === idx ? null : idx)}
+                                    className="p-1 hover:bg-gray-100 rounded"
+                                    title="Expand"
+                                  >
+                                    <Expand className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleShareResponse(msg.parts[0].text)}
+                                    className="p-1 hover:bg-gray-100 rounded"
+                                    title="Share"
+                                  >
+                                    <Share2 className="w-3 h-3" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
+
+                          {/* Edit mode for user messages */}
+                          {editingMessageIndex === idx ? (
+                            <div className="space-y-2">
+                              <textarea
+                                value={editedMessageText}
+                                onChange={(e) => setEditedMessageText(e.target.value)}
+                                className="w-full p-2 rounded border border-indigo-300 bg-indigo-700 text-white text-sm resize-none"
+                                rows={4}
+                              />
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="secondary"
+                                  className="text-xs h-7"
+                                  onClick={() => { setEditingMessageIndex(null); setEditedMessageText(""); }}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  className="text-xs h-7 bg-white text-indigo-600"
+                                  onClick={handleSaveEdit}
+                                >
+                                  Save & Regenerate
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className={`prose prose-sm max-w-none ${msg.role === 'user' ? 'prose-invert' : ''} ${expandedMessageIndex === idx ? '' : 'max-h-96 overflow-auto'}`}>
+                              <SimpleMarkdown>{msg.parts[0].text}</SimpleMarkdown>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
 
-                    {isProcessingStep && (
+                    {/* Streaming response display */}
+                    {isStreaming && streamingText && (
                       <div className="flex justify-start">
-                        <div className="bg-white border p-4 rounded-xl shadow-sm flex items-center gap-3 text-gray-600">
-                          <Loader2 className="w-5 h-5 animate-spin text-indigo-500" />
-                          <span className="text-sm font-medium">Generating response...</span>
+                        <div className="max-w-3xl rounded-xl p-4 shadow-sm bg-white border text-gray-800">
+                          <div className="text-[10px] mb-1 font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
+                            Agent <Loader2 className="w-3 h-3 animate-spin text-indigo-500" />
+                          </div>
+                          <div className="prose prose-sm max-w-none">
+                            <SimpleMarkdown>{streamingText}</SimpleMarkdown>
+                            <span className="inline-block w-2 h-4 bg-indigo-500 animate-pulse ml-1" />
+                          </div>
                         </div>
                       </div>
                     )}
+
+                    {/* Loading indicator when not streaming yet */}
+                    {isProcessingStep && !streamingText && (
+                      <div className="flex justify-start">
+                        <div className="bg-white border p-4 rounded-xl shadow-sm flex items-center gap-3 text-gray-600">
+                          <Loader2 className="w-5 h-5 animate-spin text-indigo-500" />
+                          <span className="text-sm font-medium">Connecting to AI...</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Agent Suggestions after response */}
+                    {suggestedAgents.length > 0 && stepHistory.length > 0 && !isProcessingStep && isFreeMode && (
+                      <div className="flex justify-center">
+                        <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 max-w-2xl">
+                          <div className="flex items-center gap-2 text-purple-700 text-sm font-medium mb-3">
+                            <Lightbulb className="w-4 h-4" />
+                            Suggested next agents:
+                          </div>
+                          <div className="flex gap-2 flex-wrap">
+                            {suggestedAgents.map(({ agent, reason }) => (
+                              <button
+                                key={agent.id}
+                                onClick={() => addFreeModeStep(agent.id)}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-purple-200 rounded-lg text-sm hover:bg-purple-100 transition-colors"
+                              >
+                                <div className={`w-6 h-6 rounded-full flex items-center justify-center ${agent.color.split(' ')[0]}`}>
+                                  <Bot className={`w-4 h-4 ${agent.color.split(' ')[1]}`} />
+                                </div>
+                                <div className="text-left">
+                                  <div className="font-medium text-gray-700">{agent.name}</div>
+                                  <div className="text-[10px] text-gray-500">{reason}</div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     <div ref={chatEndRef} />
                   </div>
 
                   {/* Guardrail Warning */}
                   {guardrailWarning && (
-                    <div className="bg-amber-50 border-t border-amber-200 p-4">
+                    <div className={`border-t p-4 ${guardrailWarning.severity === 'critical' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
                       <div className="flex items-start gap-3">
-                        <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                        <div className="text-2xl shrink-0">{guardrailWarning.icon || '🛡️'}</div>
                         <div className="flex-1">
-                          <h4 className="font-bold text-amber-800">Content Blocked: {guardrailWarning.category}</h4>
-                          <p className="text-sm text-amber-700 mt-1">{guardrailWarning.reason}</p>
+                          <div className="flex items-center gap-2">
+                            <h4 className={`font-bold ${guardrailWarning.severity === 'critical' ? 'text-red-800' : 'text-amber-800'}`}>
+                              Content Blocked: {guardrailWarning.category}
+                            </h4>
+                            <span className={`text-xs px-2 py-0.5 rounded ${
+                              guardrailWarning.severity === 'critical' ? 'bg-red-200 text-red-800' :
+                              guardrailWarning.severity === 'high' ? 'bg-orange-200 text-orange-800' :
+                              'bg-amber-200 text-amber-800'
+                            }`}>
+                              {guardrailWarning.severity}
+                            </span>
+                          </div>
+                          <p className={`text-sm mt-1 ${guardrailWarning.severity === 'critical' ? 'text-red-700' : 'text-amber-700'}`}>
+                            {guardrailWarning.reason}
+                          </p>
+                          {guardrailWarning.matchedText && (
+                            <div className="mt-2 p-2 bg-white/50 rounded border border-amber-200">
+                              <span className="text-xs text-gray-600">Detected pattern: </span>
+                              <code className="text-xs font-mono text-red-600 bg-red-50 px-1 py-0.5 rounded">
+                                {guardrailWarning.matchedText}
+                              </code>
+                            </div>
+                          )}
                           {guardrailWarning.canOverride && (
                             <div className="mt-3 flex items-center gap-3">
                               <label className="flex items-center gap-2 text-sm text-amber-800 cursor-pointer">
@@ -1103,10 +1760,50 @@ export default function AgentOrchestrator() {
                             </div>
                           )}
                           {!guardrailWarning.canOverride && (
-                            <p className="text-xs text-amber-600 mt-2">This type of content cannot be overridden for safety reasons.</p>
+                            <div className="mt-2 flex items-center gap-2 text-xs text-red-600">
+                              <ShieldOff className="w-3 h-3" />
+                              This type of content cannot be overridden for safety reasons.
+                            </div>
                           )}
                         </div>
-                        <button onClick={() => setGuardrailWarning(null)} className="text-amber-400 hover:text-amber-600">
+                        <button onClick={() => setGuardrailWarning(null)} className={`${guardrailWarning.severity === 'critical' ? 'text-red-400 hover:text-red-600' : 'text-amber-400 hover:text-amber-600'}`}>
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Error with Suggestions */}
+                  {errorWithSuggestions && (
+                    <div className="bg-red-50 border-t border-red-200 p-4">
+                      <div className="flex items-start gap-3">
+                        <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <h4 className="font-bold text-red-800">Error Occurred</h4>
+                          <p className="text-sm text-red-700 mt-1 font-mono">{errorWithSuggestions.originalError}</p>
+                          <div className="mt-3 space-y-2">
+                            {errorWithSuggestions.suggestions.map((suggestion, idx) => (
+                              <div key={idx} className="bg-white p-3 rounded-lg border border-red-100">
+                                <div className="flex items-center gap-2">
+                                  <Zap className="w-4 h-4 text-amber-500" />
+                                  <span className="font-medium text-gray-800">{suggestion.message}</span>
+                                </div>
+                                <p className="text-sm text-gray-600 mt-1">{suggestion.fix}</p>
+                                {suggestion.link && (
+                                  <a
+                                    href={suggestion.link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:underline mt-2"
+                                  >
+                                    Get API Key <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <button onClick={() => setErrorWithSuggestions(null)} className="text-red-400 hover:text-red-600">
                           <X className="w-4 h-4" />
                         </button>
                       </div>
@@ -1116,6 +1813,111 @@ export default function AgentOrchestrator() {
                   {/* Input Area */}
                   <div className="bg-white border-t p-4">
                     <div className="max-w-4xl mx-auto space-y-3">
+                      {/* Token & Context Indicator */}
+                      {tokenEstimate && (
+                        <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <div className="flex items-center gap-2">
+                            <BarChart3 className="w-3.5 h-3.5" />
+                            <span>~{tokenEstimate.inputTokens.toLocaleString()} tokens</span>
+                          </div>
+                          <div className="flex-1 max-w-xs">
+                            <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${tokenEstimate.percentUsed > 80 ? 'bg-red-500' : tokenEstimate.percentUsed > 50 ? 'bg-amber-500' : 'bg-green-500'}`}
+                                style={{ width: `${tokenEstimate.percentUsed}%` }}
+                              />
+                            </div>
+                          </div>
+                          <span>{tokenEstimate.percentUsed.toFixed(1)}% of context</span>
+                          <span className="text-green-600">~${tokenEstimate.estimatedCost.toFixed(4)}</span>
+                        </div>
+                      )}
+
+                      {/* Model Recommendations */}
+                      {(() => {
+                        const step = workflow[activeStepIndex];
+                        const agent = step ? agents.find(a => a.id === step.agentId) : null;
+                        const currentModelInfo = agent ? getModelById(agent.model) : null;
+                        const providerInfo = currentModelInfo ? MODEL_PROVIDERS[currentModelInfo.provider] : null;
+
+                        return (
+                          <div className="flex flex-wrap items-center gap-2 text-xs">
+                            {/* Current Model Display */}
+                            {currentModelInfo && (
+                              <div className="flex items-center gap-1.5 px-2 py-1 bg-gray-100 border border-gray-200 rounded">
+                                <span className="text-gray-500">Current:</span>
+                                <span className={providerInfo?.color || 'text-gray-700'}>
+                                  {providerInfo?.icon} {currentModelInfo.name}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Show default model indicator if a suggestion was selected */}
+                            {originalAgentModel && agent?.model !== originalAgentModel && (
+                              <div className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 border border-blue-200 rounded text-blue-700">
+                                <span className="text-blue-500">Default:</span>
+                                <span>{getModelById(originalAgentModel)?.name || originalAgentModel}</span>
+                                <button
+                                  onClick={() => {
+                                    if (agent) {
+                                      setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, model: originalAgentModel } : a));
+                                      setOriginalAgentModel(null);
+                                    }
+                                  }}
+                                  className="ml-1 text-blue-500 hover:text-blue-700 underline"
+                                  title="Click to restore default model"
+                                >
+                                  restore
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Model Recommendations */}
+                            {modelRecommendations.length > 0 && chatInput.length > 20 && (
+                              <>
+                                <div className="flex items-center gap-1.5">
+                                  <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+                                  <span className="text-gray-500">Suggested for this task:</span>
+                                </div>
+                                {modelRecommendations.map((rec, idx) => {
+                                  const recModelInfo = getModelById(rec.model);
+                                  const recProviderInfo = recModelInfo ? MODEL_PROVIDERS[recModelInfo.provider] : null;
+                                  const isCurrentlySelected = agent?.model === rec.model;
+
+                                  return (
+                                    <button
+                                      key={idx}
+                                      onClick={() => {
+                                        if (agent && !isCurrentlySelected) {
+                                          // Save original model before switching
+                                          if (!originalAgentModel) {
+                                            setOriginalAgentModel(agent.model);
+                                          }
+                                          setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, model: rec.model } : a));
+                                        }
+                                      }}
+                                      disabled={isCurrentlySelected}
+                                      className={`px-2 py-1 rounded border transition-all ${
+                                        isCurrentlySelected
+                                          ? 'bg-green-100 border-green-300 text-green-700 cursor-default'
+                                          : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 hover:border-amber-300 cursor-pointer'
+                                      }`}
+                                      title={`${rec.reason}${isCurrentlySelected ? ' (currently selected)' : ' - Click to switch'}`}
+                                    >
+                                      <span className="flex items-center gap-1">
+                                        {recProviderInfo?.icon}
+                                        <span>{recModelInfo?.name || rec.model}</span>
+                                        {isCurrentlySelected && <Check className="w-3 h-3 ml-1" />}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
+
                       {/* File Pills */}
                       {chatFiles.length > 0 && (
                         <div className="flex gap-2 overflow-x-auto pb-2">
@@ -1151,9 +1953,20 @@ export default function AgentOrchestrator() {
                         </div>
 
                         <div className="flex flex-col gap-2">
-                          <Button onClick={handleAgentInteraction} disabled={isProcessingStep || (!chatInput.trim() && chatFiles.length === 0)} className="h-10">
-                            <Send className="w-4 h-4" />
-                          </Button>
+                          {/* Compare Models Toggle */}
+                          {compareModelsEnabled ? (
+                            <Button
+                              onClick={handleCompareModels}
+                              disabled={isComparing || selectedCompareModels.length < 2 || !chatInput.trim()}
+                              className="h-10 bg-purple-600 hover:bg-purple-700"
+                            >
+                              {isComparing ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
+                            </Button>
+                          ) : (
+                            <Button onClick={handleAgentInteraction} disabled={isProcessingStep || (!chatInput.trim() && chatFiles.length === 0)} className="h-10">
+                              <Send className="w-4 h-4" />
+                            </Button>
+                          )}
                           {stepHistory.length > 0 && (
                             <Button onClick={proceedToNextAgent} variant="success" disabled={isProcessingStep} className="h-12 bg-green-600 hover:bg-green-700">
                               <span className="text-xs font-bold">NEXT</span> <ArrowRight className="w-4 h-4" />
@@ -1161,17 +1974,88 @@ export default function AgentOrchestrator() {
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-4 mt-1 px-1">
-                        <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none hover:text-indigo-600 transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={isGlobalMemoryEnabled}
-                            onChange={e => setIsGlobalMemoryEnabled(e.target.checked)}
-                            className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
-                          />
-                          <span>Contribute to Global Context</span>
-                        </label>
+
+                      {/* Options row */}
+                      <div className="flex items-center justify-between mt-1 px-1">
+                        <div className="flex items-center gap-4">
+                          <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none hover:text-indigo-600 transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={isGlobalMemoryEnabled}
+                              onChange={e => setIsGlobalMemoryEnabled(e.target.checked)}
+                              className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
+                            />
+                            <span>Global Context</span>
+                          </label>
+
+                          {/* Multi-Model Comparison Toggle */}
+                          <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none hover:text-purple-600 transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={compareModelsEnabled}
+                              onChange={e => {
+                                setCompareModelsEnabled(e.target.checked);
+                                if (!e.target.checked) {
+                                  setSelectedCompareModels([]);
+                                }
+                              }}
+                              className="rounded text-purple-600 focus:ring-purple-500 w-3.5 h-3.5"
+                            />
+                            <span>Compare Models</span>
+                          </label>
+                        </div>
+
+                        {/* Conversation Branches */}
+                        {conversationBranches.length > 0 && (
+                          <div className="flex items-center gap-2 text-xs">
+                            <GitBranch className="w-3.5 h-3.5 text-gray-400" />
+                            <select
+                              value={currentBranchId}
+                              onChange={(e) => handleSwitchBranch(e.target.value)}
+                              className="text-xs border rounded px-2 py-1"
+                            >
+                              <option value="main">Main</option>
+                              {conversationBranches.map((branch) => (
+                                <option key={branch.id} value={branch.id}>
+                                  {branch.id.replace('branch-', 'Branch ')}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
+
+                      {/* Model Selection for Comparison */}
+                      {compareModelsEnabled && (
+                        <div className="bg-purple-50 p-3 rounded-lg border border-purple-200">
+                          <div className="text-xs font-medium text-purple-700 mb-2">Select 2+ models to compare:</div>
+                          <div className="flex flex-wrap gap-2">
+                            {getAllModels().filter(m => hasApiKeyForModel(m.id)).map((model) => (
+                              <label
+                                key={model.id}
+                                className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs cursor-pointer transition-colors ${selectedCompareModels.includes(model.id) ? 'bg-purple-600 text-white' : 'bg-white border border-purple-200 text-gray-700 hover:bg-purple-100'}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedCompareModels.includes(model.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedCompareModels(prev => [...prev, model.id]);
+                                    } else {
+                                      setSelectedCompareModels(prev => prev.filter(id => id !== model.id));
+                                    }
+                                  }}
+                                  className="hidden"
+                                />
+                                {model.name}
+                              </label>
+                            ))}
+                          </div>
+                          {selectedCompareModels.length < 2 && (
+                            <p className="text-[10px] text-purple-600 mt-2">Select at least 2 models</p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1565,6 +2449,68 @@ export default function AgentOrchestrator() {
               <p className="text-sm text-gray-600 mb-6 whitespace-pre-wrap">{genericAlert.message}</p>
               <div className="flex justify-end">
                 <Button variant="primary" onClick={() => setGenericAlert(null)}>OK</Button>
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {/* Model Comparison Modal */}
+        {showComparisonModal && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <Card className="p-6 max-w-6xl w-full max-h-[90vh] overflow-hidden shadow-xl flex flex-col">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5 text-purple-600" />
+                  <h3 className="font-bold text-lg text-gray-800">Model Comparison Results</h3>
+                </div>
+                <button onClick={() => setShowComparisonModal(false)} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-auto">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {comparisonResults.map((result, idx) => (
+                    <div key={idx} className="border rounded-lg overflow-hidden">
+                      <div className={`px-4 py-2 flex items-center justify-between ${result.status === 'success' ? 'bg-gray-50' : 'bg-red-50'}`}>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{getModelById(result.model)?.name || result.model}</span>
+                          {result.status === 'success' && (
+                            <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                              {estimateTokens(result.result)} tokens
+                            </span>
+                          )}
+                        </div>
+                        {result.status === 'success' && (
+                          <Button
+                            variant="primary"
+                            className="text-xs h-7"
+                            onClick={() => handleSelectComparisonResult(result)}
+                          >
+                            Use This
+                          </Button>
+                        )}
+                      </div>
+                      <div className="p-4 max-h-64 overflow-auto">
+                        {result.status === 'success' ? (
+                          <div className="prose prose-sm max-w-none">
+                            <SimpleMarkdown>{result.result}</SimpleMarkdown>
+                          </div>
+                        ) : (
+                          <div className="text-red-600 text-sm">
+                            Error: {result.error}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 mt-4 pt-4 border-t">
+                <Button variant="secondary" onClick={() => setShowComparisonModal(false)}>
+                  Close
+                </Button>
               </div>
             </Card>
           </div>

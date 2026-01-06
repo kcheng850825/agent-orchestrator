@@ -1,6 +1,6 @@
 {
   "name": "agent-orchestrator",
-  "version": "34.0.0",
+  "version": "36.0.0",
   "description": "Multi-Agent AI Orchestration System powered by Google Gemini",
   "private": true,
   "type": "module",
