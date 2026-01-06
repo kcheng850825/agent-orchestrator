@@ -1055,7 +1055,7 @@ export default function AgentOrchestrator() {
           <h1 className="text-lg font-bold flex items-center gap-2 text-indigo-600">
             <Layers className="w-5 h-5" /> AgentOrchestrator
           </h1>
-          <p className="text-xs text-gray-400 mt-1">V34 - Multi-Provider</p>
+          <p className="text-xs text-gray-400 mt-1">V37 - Multi-Provider</p>
         </div>
 
         {/* API KEYS SECTION */}

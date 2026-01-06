@@ -3,7 +3,7 @@
  * Handles all persistent storage operations
  */
 
-const DB_NAME = 'AgentOrchestrator_V34_MultiProvider';
+const DB_NAME = 'AgentOrchestrator_V37_MultiProvider';
 const STORE_NAME = 'app_state';
 const HISTORY_STORE = 'run_history';
 const DB_VERSION = 5;

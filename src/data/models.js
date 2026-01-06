@@ -1,7 +1,7 @@
 /**
  * AI Model Configurations
  * Comprehensive list of models from Gemini, OpenAI, Anthropic Claude, and xAI Grok
- * Updated: January 2026 - V36 with corrected API model identifiers
+ * Updated: January 2026 - V37 with corrected API model identifiers
  */
 
 export const MODEL_PROVIDERS = {
