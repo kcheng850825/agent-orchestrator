@@ -1,7 +1,7 @@
 /**
  * AI Model Configurations
  * Comprehensive list of models from Gemini, OpenAI, Anthropic Claude, and xAI Grok
- * Updated: January 2026
+ * Updated: January 2026 - V36 with corrected API model identifiers
  */
 
 export const MODEL_PROVIDERS = {
@@ -37,29 +37,30 @@ export const MODEL_PROVIDERS = {
 
 export const MODELS = {
   // ========== GOOGLE GEMINI MODELS ==========
+  // Ref: https://ai.google.dev/gemini-api/docs/models
   gemini: [
     {
-      id: 'gemini-3-pro',
+      id: 'gemini-3-pro-preview',
       name: 'Gemini 3 Pro',
-      description: 'Latest flagship - Best for complex reasoning & analysis',
+      description: 'Latest flagship - Best for complex reasoning & agentic workflows',
       tier: 'flagship',
       contextWindow: '1M tokens',
       provider: 'gemini',
       isNew: true
     },
     {
-      id: 'gemini-3-flash',
+      id: 'gemini-3-flash-preview',
       name: 'Gemini 3 Flash',
-      description: 'Latest fast model - Best for everyday tasks',
+      description: 'Latest fast model - Best for multimodal understanding',
       tier: 'standard',
       contextWindow: '1M tokens',
       provider: 'gemini',
       isNew: true
     },
     {
-      id: 'gemini-3-deep-think',
+      id: 'gemini-3-deep-think-preview',
       name: 'Gemini 3 Deep Think',
-      description: 'Advanced reasoning with parallel thought streams',
+      description: 'Advanced reasoning with adaptive thinking',
       tier: 'flagship',
       contextWindow: '1M tokens',
       provider: 'gemini',
@@ -68,7 +69,7 @@ export const MODELS = {
     {
       id: 'gemini-2.5-pro',
       name: 'Gemini 2.5 Pro',
-      description: 'Best for complex reasoning & analysis',
+      description: 'Best for complex reasoning & coding',
       tier: 'flagship',
       contextWindow: '1M tokens',
       provider: 'gemini'
@@ -76,7 +77,7 @@ export const MODELS = {
     {
       id: 'gemini-2.5-flash',
       name: 'Gemini 2.5 Flash',
-      description: 'Best for fast, everyday tasks',
+      description: 'Lightning-fast with controllable thinking',
       tier: 'standard',
       contextWindow: '1M tokens',
       provider: 'gemini'
@@ -84,7 +85,7 @@ export const MODELS = {
     {
       id: 'gemini-2.5-flash-lite',
       name: 'Gemini 2.5 Flash Lite',
-      description: 'Best for high-volume, cost-efficient tasks',
+      description: 'Cost-optimized for high-throughput tasks',
       tier: 'lite',
       contextWindow: '1M tokens',
       provider: 'gemini'
@@ -98,60 +99,44 @@ export const MODELS = {
       provider: 'gemini'
     },
     {
-      id: 'gemini-1.5-pro',
-      name: 'Gemini 1.5 Pro',
-      description: 'Best for long-context understanding',
-      tier: 'standard',
-      contextWindow: '2M tokens',
+      id: 'gemini-2.0-flash-lite',
+      name: 'Gemini 2.0 Flash Lite',
+      description: 'Cost-optimized for large scale text output',
+      tier: 'lite',
+      contextWindow: '1M tokens',
       provider: 'gemini'
     }
   ],
 
   // ========== OPENAI MODELS ==========
+  // Ref: https://platform.openai.com/docs/models
   openai: [
     {
-      id: 'gpt-5.2',
-      name: 'GPT-5.2',
-      description: 'Latest flagship - Best for professional & agentic work',
+      id: 'gpt-4.1',
+      name: 'GPT-4.1',
+      description: 'Latest flagship - Major gains in coding & instruction following',
       tier: 'flagship',
-      contextWindow: '256K tokens',
+      contextWindow: '1M tokens',
       provider: 'openai',
       isNew: true
     },
     {
-      id: 'gpt-5.2-pro',
-      name: 'GPT-5.2 Pro',
-      description: 'First model to cross 90% on ARC-AGI-1',
-      tier: 'flagship',
-      contextWindow: '256K tokens',
+      id: 'gpt-4.1-mini',
+      name: 'GPT-4.1 Mini',
+      description: 'Fast & affordable with 1M context',
+      tier: 'standard',
+      contextWindow: '1M tokens',
       provider: 'openai',
       isNew: true
     },
     {
-      id: 'gpt-5.1',
-      name: 'GPT-5.1',
-      description: 'Warmer, more intelligent, better at instructions',
-      tier: 'flagship',
-      contextWindow: '256K tokens',
+      id: 'gpt-4.1-nano',
+      name: 'GPT-4.1 Nano',
+      description: 'Smallest & fastest in 4.1 family',
+      tier: 'lite',
+      contextWindow: '1M tokens',
       provider: 'openai',
       isNew: true
-    },
-    {
-      id: 'gpt-5.1-thinking',
-      name: 'GPT-5.1 Thinking',
-      description: 'Advanced reasoning model with extended thinking',
-      tier: 'flagship',
-      contextWindow: '256K tokens',
-      provider: 'openai',
-      isNew: true
-    },
-    {
-      id: 'gpt-5',
-      name: 'GPT-5',
-      description: 'Major leap in intelligence - 45% less hallucination',
-      tier: 'flagship',
-      contextWindow: '256K tokens',
-      provider: 'openai'
     },
     {
       id: 'o3',
@@ -189,27 +174,30 @@ export const MODELS = {
     {
       id: 'gpt-4o',
       name: 'GPT-4o',
-      description: 'Best for multimodal understanding',
+      description: 'Multimodal understanding (legacy)',
       tier: 'standard',
       contextWindow: '128K tokens',
-      provider: 'openai'
+      provider: 'openai',
+      isLegacy: true
     },
     {
       id: 'gpt-4o-mini',
       name: 'GPT-4o Mini',
-      description: 'Best for fast, affordable intelligence',
+      description: 'Fast & affordable (legacy)',
       tier: 'lite',
       contextWindow: '128K tokens',
-      provider: 'openai'
+      provider: 'openai',
+      isLegacy: true
     }
   ],
 
   // ========== ANTHROPIC CLAUDE MODELS ==========
+  // Ref: https://docs.anthropic.com/en/docs/about-claude/models/overview
   anthropic: [
     {
-      id: 'claude-opus-4-5-20251101',
+      id: 'claude-opus-4-5-20251124',
       name: 'Claude Opus 4.5',
-      description: 'Latest flagship - Best in world for coding & agents',
+      description: 'Latest flagship - Industry leader for coding & agents',
       tier: 'flagship',
       contextWindow: '200K tokens',
       outputLimit: '64K tokens',
@@ -217,7 +205,24 @@ export const MODELS = {
       isNew: true
     },
     {
-      id: 'claude-opus-4-20250514',
+      id: 'claude-sonnet-4-5-20250929',
+      name: 'Claude Sonnet 4.5',
+      description: 'Best coding model - 1M context available',
+      tier: 'flagship',
+      contextWindow: '200K tokens',
+      provider: 'anthropic',
+      isNew: true
+    },
+    {
+      id: 'claude-opus-4-1-20250805',
+      name: 'Claude Opus 4.1',
+      description: 'Best for agentic search & coding',
+      tier: 'flagship',
+      contextWindow: '200K tokens',
+      provider: 'anthropic'
+    },
+    {
+      id: 'claude-opus-4-20250522',
       name: 'Claude Opus 4',
       description: 'Best for complex, nuanced analysis',
       tier: 'flagship',
@@ -225,49 +230,35 @@ export const MODELS = {
       provider: 'anthropic'
     },
     {
-      id: 'claude-sonnet-4-20250514',
+      id: 'claude-sonnet-4-20250522',
       name: 'Claude Sonnet 4',
       description: 'Best for coding & technical tasks',
-      tier: 'flagship',
+      tier: 'standard',
       contextWindow: '200K tokens',
       provider: 'anthropic'
     },
     {
-      id: 'claude-3-7-sonnet-20250219',
-      name: 'Claude 3.7 Sonnet',
-      description: 'Best for balanced performance',
-      tier: 'standard',
+      id: 'claude-haiku-4-5-20251022',
+      name: 'Claude Haiku 4.5',
+      description: 'Near-frontier coding, matches Sonnet 4',
+      tier: 'lite',
       contextWindow: '200K tokens',
-      provider: 'anthropic'
+      provider: 'anthropic',
+      isNew: true
     },
     {
       id: 'claude-3-5-sonnet-20241022',
       name: 'Claude 3.5 Sonnet',
-      description: 'Best for writing & creativity',
+      description: 'Writing & creativity (retiring soon)',
       tier: 'standard',
       contextWindow: '200K tokens',
-      provider: 'anthropic'
+      provider: 'anthropic',
+      isLegacy: true
     },
     {
       id: 'claude-3-5-haiku-20241022',
       name: 'Claude 3.5 Haiku',
-      description: 'Best for speed & efficiency',
-      tier: 'lite',
-      contextWindow: '200K tokens',
-      provider: 'anthropic'
-    },
-    {
-      id: 'claude-3-opus-20240229',
-      name: 'Claude 3 Opus',
-      description: 'Best for research & deep analysis',
-      tier: 'standard',
-      contextWindow: '200K tokens',
-      provider: 'anthropic'
-    },
-    {
-      id: 'claude-3-haiku-20240307',
-      name: 'Claude 3 Haiku',
-      description: 'Best for quick, simple responses',
+      description: 'Speed & efficiency',
       tier: 'lite',
       contextWindow: '200K tokens',
       provider: 'anthropic'
@@ -275,22 +266,32 @@ export const MODELS = {
   ],
 
   // ========== XAI GROK MODELS ==========
+  // Ref: https://docs.x.ai/docs/models
   xai: [
     {
-      id: 'grok-4.1',
-      name: 'Grok 4.1',
-      description: 'Latest flagship - #1 on LMArena (1483 Elo)',
+      id: 'grok-4-1-fast-reasoning',
+      name: 'Grok 4.1 Fast (Reasoning)',
+      description: 'Frontier model optimized for agentic tool calling',
       tier: 'flagship',
-      contextWindow: '256K tokens',
+      contextWindow: '2M tokens',
       provider: 'xai',
       isNew: true
     },
     {
-      id: 'grok-4.1-fast',
-      name: 'Grok 4.1 Fast',
-      description: '40% fewer thinking tokens, 2M context window',
+      id: 'grok-4-1-fast-non-reasoning',
+      name: 'Grok 4.1 Fast (Instant)',
+      description: 'Fast variant for instant responses without reasoning',
       tier: 'flagship',
       contextWindow: '2M tokens',
+      provider: 'xai',
+      isNew: true
+    },
+    {
+      id: 'grok-code-fast-1',
+      name: 'Grok Code Fast',
+      description: 'Speedy & economical for agentic coding',
+      tier: 'standard',
+      contextWindow: '256K tokens',
       provider: 'xai',
       isNew: true
     },
@@ -303,33 +304,25 @@ export const MODELS = {
       provider: 'xai'
     },
     {
-      id: 'grok-4-heavy',
-      name: 'Grok 4 Heavy',
-      description: 'Maximum capability for complex tasks',
-      tier: 'flagship',
-      contextWindow: '256K tokens',
-      provider: 'xai'
-    },
-    {
       id: 'grok-3',
       name: 'Grok 3',
-      description: 'Best for general-purpose reasoning',
+      description: 'Flagship reasoning model (Feb 2025)',
       tier: 'standard',
       contextWindow: '128K tokens',
       provider: 'xai'
     },
     {
-      id: 'grok-3-mini',
-      name: 'Grok 3 Mini',
-      description: 'Fast & efficient for everyday tasks',
-      tier: 'lite',
-      contextWindow: '128K tokens',
+      id: 'grok-2-1212',
+      name: 'Grok 2',
+      description: 'Better accuracy & multilingual capabilities',
+      tier: 'standard',
+      contextWindow: '32K tokens',
       provider: 'xai'
     },
     {
       id: 'grok-2-vision-1212',
       name: 'Grok 2 Vision',
-      description: 'Best for image understanding & analysis',
+      description: 'Image understanding & analysis',
       tier: 'standard',
       contextWindow: '32K tokens',
       provider: 'xai'
@@ -337,7 +330,7 @@ export const MODELS = {
     {
       id: 'grok-2-image-1212',
       name: 'Grok 2 Image',
-      description: 'Image generation capabilities',
+      description: 'Text-to-image generation',
       tier: 'standard',
       contextWindow: '32K tokens',
       provider: 'xai'
@@ -399,6 +392,13 @@ export const getModelsByTier = (tier) => {
   return getAllModels().filter(m => m.tier === tier);
 };
 
+/**
+ * Get non-legacy models only
+ */
+export const getActiveModels = () => {
+  return getAllModels().filter(m => !m.isLegacy);
+};
+
 export default {
   MODEL_PROVIDERS,
   MODELS,
@@ -408,5 +408,6 @@ export default {
   getProviderForModel,
   hasApiKeyForModel,
   getNewModels,
-  getModelsByTier
+  getModelsByTier,
+  getActiveModels
 };

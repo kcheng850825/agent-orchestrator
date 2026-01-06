@@ -123,6 +123,7 @@ export default function AgentOrchestrator() {
   // NEW: Model recommendations
   const [modelRecommendations, setModelRecommendations] = useState([]);
   const [showRecommendations, setShowRecommendations] = useState(false);
+  const [originalAgentModel, setOriginalAgentModel] = useState(null); // Tracks default model when suggestion is selected
 
   // NEW: Multi-model comparison
   const [compareModelsEnabled, setCompareModelsEnabled] = useState(false);
@@ -1833,28 +1834,89 @@ export default function AgentOrchestrator() {
                       )}
 
                       {/* Model Recommendations */}
-                      {modelRecommendations.length > 0 && chatInput.length > 20 && (
-                        <div className="flex items-center gap-2 text-xs">
-                          <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
-                          <span className="text-gray-500">Suggested:</span>
-                          {modelRecommendations.map((rec, idx) => (
-                            <button
-                              key={idx}
-                              onClick={() => {
-                                const step = workflow[activeStepIndex];
-                                const agent = agents.find(a => a.id === step.agentId);
-                                if (agent) {
-                                  setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, model: rec.model } : a));
-                                }
-                              }}
-                              className="px-2 py-0.5 bg-amber-50 border border-amber-200 rounded text-amber-700 hover:bg-amber-100"
-                              title={rec.reason}
-                            >
-                              {getModelById(rec.model)?.name || rec.model}
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                      {(() => {
+                        const step = workflow[activeStepIndex];
+                        const agent = step ? agents.find(a => a.id === step.agentId) : null;
+                        const currentModelInfo = agent ? getModelById(agent.model) : null;
+                        const providerInfo = currentModelInfo ? MODEL_PROVIDERS[currentModelInfo.provider] : null;
+
+                        return (
+                          <div className="flex flex-wrap items-center gap-2 text-xs">
+                            {/* Current Model Display */}
+                            {currentModelInfo && (
+                              <div className="flex items-center gap-1.5 px-2 py-1 bg-gray-100 border border-gray-200 rounded">
+                                <span className="text-gray-500">Current:</span>
+                                <span className={providerInfo?.color || 'text-gray-700'}>
+                                  {providerInfo?.icon} {currentModelInfo.name}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Show default model indicator if a suggestion was selected */}
+                            {originalAgentModel && agent?.model !== originalAgentModel && (
+                              <div className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 border border-blue-200 rounded text-blue-700">
+                                <span className="text-blue-500">Default:</span>
+                                <span>{getModelById(originalAgentModel)?.name || originalAgentModel}</span>
+                                <button
+                                  onClick={() => {
+                                    if (agent) {
+                                      setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, model: originalAgentModel } : a));
+                                      setOriginalAgentModel(null);
+                                    }
+                                  }}
+                                  className="ml-1 text-blue-500 hover:text-blue-700 underline"
+                                  title="Click to restore default model"
+                                >
+                                  restore
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Model Recommendations */}
+                            {modelRecommendations.length > 0 && chatInput.length > 20 && (
+                              <>
+                                <div className="flex items-center gap-1.5">
+                                  <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+                                  <span className="text-gray-500">Suggested for this task:</span>
+                                </div>
+                                {modelRecommendations.map((rec, idx) => {
+                                  const recModelInfo = getModelById(rec.model);
+                                  const recProviderInfo = recModelInfo ? MODEL_PROVIDERS[recModelInfo.provider] : null;
+                                  const isCurrentlySelected = agent?.model === rec.model;
+
+                                  return (
+                                    <button
+                                      key={idx}
+                                      onClick={() => {
+                                        if (agent && !isCurrentlySelected) {
+                                          // Save original model before switching
+                                          if (!originalAgentModel) {
+                                            setOriginalAgentModel(agent.model);
+                                          }
+                                          setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, model: rec.model } : a));
+                                        }
+                                      }}
+                                      disabled={isCurrentlySelected}
+                                      className={`px-2 py-1 rounded border transition-all ${
+                                        isCurrentlySelected
+                                          ? 'bg-green-100 border-green-300 text-green-700 cursor-default'
+                                          : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 hover:border-amber-300 cursor-pointer'
+                                      }`}
+                                      title={`${rec.reason}${isCurrentlySelected ? ' (currently selected)' : ' - Click to switch'}`}
+                                    >
+                                      <span className="flex items-center gap-1">
+                                        {recProviderInfo?.icon}
+                                        <span>{recModelInfo?.name || rec.model}</span>
+                                        {isCurrentlySelected && <Check className="w-3 h-3 ml-1" />}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* File Pills */}
                       {chatFiles.length > 0 && (
