@@ -1,8 +1,8 @@
-# 🤖 AgentOrchestrator V34
+# 🤖 AgentOrchestrator V35
 
 A powerful multi-agent AI orchestration system powered by Google Gemini. Create, configure, and run AI agent pipelines for complex tasks like grant writing, content creation, and more.
 
-![Version](https://img.shields.io/badge/version-34.0.0-blue)
+![Version](https://img.shields.io/badge/version-35.0.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## ✨ Features
@@ -173,7 +173,7 @@ If you've never used GitHub before, here's exactly what to do:
    git add .
 
    # Create your first commit
-   git commit -m "Initial commit - AgentOrchestrator V34"
+   git commit -m "Initial commit - AgentOrchestrator V35"
 
    # Connect to GitHub (replace YOUR-USERNAME)
    git remote add origin https://github.com/YOUR-USERNAME/agent-orchestrator.git

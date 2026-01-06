@@ -682,16 +682,22 @@ export const callAIStream = async (
   globalMemory = "",
   guardrailsEnabled = true,
   guardrailOverride = false,
-  onChunk = () => {}
+  onChunk = () => {},
+  guardrailSettings = null
 ) => {
   // Check guardrails before making API call
   if (guardrailsEnabled && !guardrailOverride) {
-    const guardrailCheck = checkGuardrails(userPrompt);
+    const guardrailCheck = checkGuardrails(userPrompt, guardrailSettings);
     if (guardrailCheck.blocked) {
       return {
         blocked: true,
         reason: guardrailCheck.reason,
-        category: guardrailCheck.category
+        category: guardrailCheck.category,
+        categoryId: guardrailCheck.categoryId,
+        icon: guardrailCheck.icon,
+        severity: guardrailCheck.severity,
+        matchedText: guardrailCheck.matchedText,
+        canOverride: guardrailCheck.canOverride
       };
     }
   }
@@ -747,16 +753,22 @@ export const callAI = async (
   userAttachments = [],
   globalMemory = "",
   guardrailsEnabled = true,
-  guardrailOverride = false
+  guardrailOverride = false,
+  guardrailSettings = null
 ) => {
   // Check guardrails before making API call
   if (guardrailsEnabled && !guardrailOverride) {
-    const guardrailCheck = checkGuardrails(userPrompt);
+    const guardrailCheck = checkGuardrails(userPrompt, guardrailSettings);
     if (guardrailCheck.blocked) {
       return {
         blocked: true,
         reason: guardrailCheck.reason,
-        category: guardrailCheck.category
+        category: guardrailCheck.category,
+        categoryId: guardrailCheck.categoryId,
+        icon: guardrailCheck.icon,
+        severity: guardrailCheck.severity,
+        matchedText: guardrailCheck.matchedText,
+        canOverride: guardrailCheck.canOverride
       };
     }
   }

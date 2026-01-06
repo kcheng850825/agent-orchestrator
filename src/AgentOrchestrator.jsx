@@ -28,7 +28,13 @@ import {
   estimateCost,
   recommendModel
 } from './services/api';
-import { checkGuardrails, getGuardrailSystemPrompt } from './services/guardrails';
+import {
+  checkGuardrails,
+  getGuardrailSystemPrompt,
+  getGuardrailCategories,
+  getDefaultGuardrailSettings,
+  getSeverityColor
+} from './services/guardrails';
 
 // Import data
 import { DEFAULT_AGENTS, DEFAULT_WORKFLOW } from './data/defaultKnowledgeBases';
@@ -79,6 +85,8 @@ export default function AgentOrchestrator() {
   const [guardrailsEnabled, setGuardrailsEnabled] = useState(true);
   const [guardrailOverride, setGuardrailOverride] = useState(false);
   const [guardrailWarning, setGuardrailWarning] = useState(null);
+  const [guardrailSettings, setGuardrailSettings] = useState(getDefaultGuardrailSettings());
+  const [showGuardrailsPanel, setShowGuardrailsPanel] = useState(false);
 
   // UI State
   const [activeTab, setActiveTab] = useState("run");
@@ -193,6 +201,7 @@ export default function AgentOrchestrator() {
         const w = await dbCore.load('workflow');
         const fm = await dbCore.load('isFreeMode');
         const ge = await dbCore.load('guardrailsEnabled');
+        const gs = await dbCore.load('guardrailSettings');
         const runs = await dbCore.loadAllRuns();
 
         if (mounted) {
@@ -205,6 +214,7 @@ export default function AgentOrchestrator() {
           if (w?.length) setWorkflow(w); else setWorkflow(DEFAULT_WORKFLOW);
           if (fm !== undefined) setIsFreeMode(fm);
           if (ge !== undefined) setGuardrailsEnabled(ge);
+          if (gs) setGuardrailSettings(gs);
           if (runs) setSavedRuns(runs.sort((a, b) => b.timestamp - a.timestamp));
           setIsLoaded(true);
         }
@@ -227,11 +237,12 @@ export default function AgentOrchestrator() {
       await dbCore.save('workflow', workflow);
       await dbCore.save('isFreeMode', isFreeMode);
       await dbCore.save('guardrailsEnabled', guardrailsEnabled);
+      await dbCore.save('guardrailSettings', guardrailSettings);
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2000);
     }, 2000);
     return () => clearTimeout(t);
-  }, [apiKeys, agents, workflow, isFreeMode, guardrailsEnabled, isLoaded]);
+  }, [apiKeys, agents, workflow, isFreeMode, guardrailsEnabled, guardrailSettings, isLoaded]);
 
   // --- HISTORY MANAGEMENT ---
   const saveCurrentRun = async () => {
@@ -731,7 +742,8 @@ export default function AgentOrchestrator() {
         (chunk, fullText) => {
           // Stream callback - update UI in real-time
           setStreamingText(fullText);
-        }
+        },
+        guardrailSettings
       );
 
       // Check if blocked by guardrails
@@ -739,6 +751,10 @@ export default function AgentOrchestrator() {
         setGuardrailWarning({
           reason: result.reason,
           category: result.category,
+          categoryId: result.categoryId,
+          icon: result.icon,
+          severity: result.severity,
+          matchedText: result.matchedText,
           canOverride: result.canOverride
         });
         setIsProcessingStep(false);
@@ -825,7 +841,8 @@ export default function AgentOrchestrator() {
         guardrailOverride,
         (chunk, fullText) => {
           setStreamingText(fullText);
-        }
+        },
+        guardrailSettings
       );
 
       // Check if blocked by guardrails
@@ -833,6 +850,10 @@ export default function AgentOrchestrator() {
         setGuardrailWarning({
           reason: result.reason,
           category: result.category,
+          categoryId: result.categoryId,
+          icon: result.icon,
+          severity: result.severity,
+          matchedText: result.matchedText,
           canOverride: result.canOverride
         });
         setChatInput(userMessage);
@@ -1127,17 +1148,101 @@ export default function AgentOrchestrator() {
             </div>
           </label>
 
-          {/* Guardrails Toggle */}
-          <label className={`flex items-center gap-2 cursor-pointer p-2 rounded border ${guardrailsEnabled ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-            <input type="checkbox" checked={guardrailsEnabled} onChange={e => setGuardrailsEnabled(e.target.checked)} className="rounded text-green-600 focus:ring-green-500" />
-            <div className="flex flex-col">
-              <span className="font-bold text-gray-800 flex items-center gap-1">
-                {guardrailsEnabled ? <Shield className="w-3 h-3 text-green-600" /> : <ShieldOff className="w-3 h-3 text-red-600" />}
-                Safety Guardrails
-              </span>
-              <span className="text-[10px] text-gray-500">{guardrailsEnabled ? 'Protection enabled' : 'Protection disabled'}</span>
+          {/* Guardrails Toggle with Expandable Panel */}
+          <div className={`rounded border ${guardrailsEnabled ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+            <div className="flex items-center gap-2 p-2">
+              <input
+                type="checkbox"
+                checked={guardrailsEnabled}
+                onChange={e => setGuardrailsEnabled(e.target.checked)}
+                className="rounded text-green-600 focus:ring-green-500"
+              />
+              <div className="flex-1 cursor-pointer" onClick={() => setShowGuardrailsPanel(!showGuardrailsPanel)}>
+                <span className="font-bold text-gray-800 flex items-center gap-1">
+                  {guardrailsEnabled ? <Shield className="w-3 h-3 text-green-600" /> : <ShieldOff className="w-3 h-3 text-red-600" />}
+                  Safety Guardrails
+                </span>
+                <span className="text-[10px] text-gray-500">{guardrailsEnabled ? 'Click to configure' : 'Protection disabled'}</span>
+              </div>
+              <button
+                onClick={() => setShowGuardrailsPanel(!showGuardrailsPanel)}
+                className="p-1 hover:bg-green-100 rounded"
+              >
+                {showGuardrailsPanel ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              </button>
             </div>
-          </label>
+
+            {/* Expandable Guardrails Configuration Panel */}
+            {showGuardrailsPanel && guardrailsEnabled && (
+              <div className="border-t border-green-200 p-2 space-y-3 max-h-64 overflow-y-auto">
+                {/* Hard Guardrails */}
+                <div>
+                  <h4 className="text-[10px] font-bold text-gray-600 uppercase mb-2">Core Safety (Cannot Disable)</h4>
+                  {getGuardrailCategories().hardGuardrails.filter(g => !g.canDisable).map(guardrail => {
+                    const colors = getSeverityColor(guardrail.severity);
+                    return (
+                      <div key={guardrail.id} className={`p-2 mb-1 rounded ${colors.bg} ${colors.border} border`}>
+                        <div className="flex items-center gap-2">
+                          <span>{guardrail.icon}</span>
+                          <span className={`font-medium text-[11px] ${colors.text}`}>{guardrail.name}</span>
+                          <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded ${colors.bg} ${colors.text} border ${colors.border}`}>
+                            {guardrail.severity}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-gray-600 mt-1">{guardrail.description}</p>
+                        <div className="text-[9px] text-gray-500 mt-1">
+                          Examples: {guardrail.examples.slice(0, 2).join(', ')}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Configurable Guardrails */}
+                <div>
+                  <h4 className="text-[10px] font-bold text-gray-600 uppercase mb-2">Configurable Protection</h4>
+                  {[...getGuardrailCategories().hardGuardrails.filter(g => g.canDisable), ...getGuardrailCategories().softGuardrails].map(guardrail => {
+                    const colors = getSeverityColor(guardrail.severity);
+                    const isEnabled = guardrailSettings[guardrail.id]?.enabled !== false;
+                    return (
+                      <div key={guardrail.id} className={`p-2 mb-1 rounded border ${isEnabled ? colors.bg + ' ' + colors.border : 'bg-gray-100 border-gray-200'}`}>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={(e) => {
+                              setGuardrailSettings(prev => ({
+                                ...prev,
+                                [guardrail.id]: { ...prev[guardrail.id], enabled: e.target.checked }
+                              }));
+                            }}
+                            className="rounded text-green-600 focus:ring-green-500"
+                          />
+                          <span>{guardrail.icon}</span>
+                          <span className={`font-medium text-[11px] ${isEnabled ? colors.text : 'text-gray-500'}`}>{guardrail.name}</span>
+                          <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded ${isEnabled ? colors.bg + ' ' + colors.text + ' border ' + colors.border : 'bg-gray-200 text-gray-500'}`}>
+                            {guardrail.severity}
+                          </span>
+                        </div>
+                        <p className={`text-[10px] mt-1 ${isEnabled ? 'text-gray-600' : 'text-gray-400'}`}>{guardrail.description}</p>
+                        <div className={`text-[9px] mt-1 ${isEnabled ? 'text-gray-500' : 'text-gray-400'}`}>
+                          Examples: {guardrail.examples.slice(0, 2).join(', ')}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Reset Button */}
+                <button
+                  onClick={() => setGuardrailSettings(getDefaultGuardrailSettings())}
+                  className="w-full text-[10px] text-gray-500 hover:text-gray-700 py-1 border-t border-green-200 mt-2"
+                >
+                  Reset to Defaults
+                </button>
+              </div>
+            )}
+          </div>
 
           {globalConversationMemory.length > 0 && (
             <button
@@ -1608,12 +1713,33 @@ export default function AgentOrchestrator() {
 
                   {/* Guardrail Warning */}
                   {guardrailWarning && (
-                    <div className="bg-amber-50 border-t border-amber-200 p-4">
+                    <div className={`border-t p-4 ${guardrailWarning.severity === 'critical' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
                       <div className="flex items-start gap-3">
-                        <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                        <div className="text-2xl shrink-0">{guardrailWarning.icon || '🛡️'}</div>
                         <div className="flex-1">
-                          <h4 className="font-bold text-amber-800">Content Blocked: {guardrailWarning.category}</h4>
-                          <p className="text-sm text-amber-700 mt-1">{guardrailWarning.reason}</p>
+                          <div className="flex items-center gap-2">
+                            <h4 className={`font-bold ${guardrailWarning.severity === 'critical' ? 'text-red-800' : 'text-amber-800'}`}>
+                              Content Blocked: {guardrailWarning.category}
+                            </h4>
+                            <span className={`text-xs px-2 py-0.5 rounded ${
+                              guardrailWarning.severity === 'critical' ? 'bg-red-200 text-red-800' :
+                              guardrailWarning.severity === 'high' ? 'bg-orange-200 text-orange-800' :
+                              'bg-amber-200 text-amber-800'
+                            }`}>
+                              {guardrailWarning.severity}
+                            </span>
+                          </div>
+                          <p className={`text-sm mt-1 ${guardrailWarning.severity === 'critical' ? 'text-red-700' : 'text-amber-700'}`}>
+                            {guardrailWarning.reason}
+                          </p>
+                          {guardrailWarning.matchedText && (
+                            <div className="mt-2 p-2 bg-white/50 rounded border border-amber-200">
+                              <span className="text-xs text-gray-600">Detected pattern: </span>
+                              <code className="text-xs font-mono text-red-600 bg-red-50 px-1 py-0.5 rounded">
+                                {guardrailWarning.matchedText}
+                              </code>
+                            </div>
+                          )}
                           {guardrailWarning.canOverride && (
                             <div className="mt-3 flex items-center gap-3">
                               <label className="flex items-center gap-2 text-sm text-amber-800 cursor-pointer">
@@ -1633,10 +1759,13 @@ export default function AgentOrchestrator() {
                             </div>
                           )}
                           {!guardrailWarning.canOverride && (
-                            <p className="text-xs text-amber-600 mt-2">This type of content cannot be overridden for safety reasons.</p>
+                            <div className="mt-2 flex items-center gap-2 text-xs text-red-600">
+                              <ShieldOff className="w-3 h-3" />
+                              This type of content cannot be overridden for safety reasons.
+                            </div>
                           )}
                         </div>
-                        <button onClick={() => setGuardrailWarning(null)} className="text-amber-400 hover:text-amber-600">
+                        <button onClick={() => setGuardrailWarning(null)} className={`${guardrailWarning.severity === 'critical' ? 'text-red-400 hover:text-red-600' : 'text-amber-400 hover:text-amber-600'}`}>
                           <X className="w-4 h-4" />
                         </button>
                       </div>
