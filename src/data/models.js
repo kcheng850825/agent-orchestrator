@@ -111,6 +111,86 @@ export const MODELS = {
   // ========== OPENAI MODELS ==========
   // Ref: https://platform.openai.com/docs/models & https://platform.openai.com/docs/pricing
   openai: [
+    // GPT-5 Family - Latest flagship models (Dec 2025)
+    {
+      id: 'gpt-5.2',
+      name: 'GPT-5.2',
+      description: 'Latest flagship - Smartest & most capable model',
+      tier: 'flagship',
+      contextWindow: '256K tokens',
+      provider: 'openai',
+      isNew: true
+    },
+    {
+      id: 'gpt-5.2-pro',
+      name: 'GPT-5.2 Pro',
+      description: 'Pro reasoning - Extended thinking for complex tasks',
+      tier: 'flagship',
+      contextWindow: '256K tokens',
+      provider: 'openai',
+      isNew: true
+    },
+    {
+      id: 'gpt-5.1',
+      name: 'GPT-5.1',
+      description: 'Warmer, more intelligent, better instructions (Nov 2025)',
+      tier: 'flagship',
+      contextWindow: '256K tokens',
+      provider: 'openai',
+      isNew: true
+    },
+    {
+      id: 'gpt-5',
+      name: 'GPT-5',
+      description: 'Major leap in intelligence - 45% less hallucination',
+      tier: 'flagship',
+      contextWindow: '256K tokens',
+      provider: 'openai'
+    },
+    {
+      id: 'gpt-5-pro',
+      name: 'GPT-5 Pro',
+      description: 'Pro reasoning version of GPT-5',
+      tier: 'flagship',
+      contextWindow: '256K tokens',
+      provider: 'openai'
+    },
+    {
+      id: 'gpt-5-mini',
+      name: 'GPT-5 Mini',
+      description: 'Fast & affordable GPT-5 - Great balance of power & speed',
+      tier: 'standard',
+      contextWindow: '256K tokens',
+      provider: 'openai',
+      isNew: true
+    },
+    {
+      id: 'gpt-5-nano',
+      name: 'GPT-5 Nano',
+      description: 'Fastest & cheapest GPT-5 variant',
+      tier: 'lite',
+      contextWindow: '256K tokens',
+      provider: 'openai',
+      isNew: true
+    },
+    {
+      id: 'gpt-5.1-codex',
+      name: 'GPT-5.1 Codex',
+      description: 'Optimized for code generation & understanding',
+      tier: 'flagship',
+      contextWindow: '256K tokens',
+      provider: 'openai',
+      isNew: true
+    },
+    {
+      id: 'gpt-5.1-codex-mini',
+      name: 'GPT-5.1 Codex Mini',
+      description: 'Fast coding model - Great for autocomplete',
+      tier: 'standard',
+      contextWindow: '256K tokens',
+      provider: 'openai',
+      isNew: true
+    },
     // GPT-4.1 Family - Smartest non-reasoning models (April 2025)
     {
       id: 'gpt-4.1',
@@ -118,8 +198,7 @@ export const MODELS = {
       description: 'Smartest non-reasoning model - Excels at coding & instruction following',
       tier: 'flagship',
       contextWindow: '1M tokens',
-      provider: 'openai',
-      isNew: true
+      provider: 'openai'
     },
     {
       id: 'gpt-4.1-mini',
@@ -127,8 +206,7 @@ export const MODELS = {
       description: 'Beats GPT-4o at 83% lower cost - Great for text & vision',
       tier: 'standard',
       contextWindow: '1M tokens',
-      provider: 'openai',
-      isNew: true
+      provider: 'openai'
     },
     {
       id: 'gpt-4.1-nano',
@@ -136,8 +214,7 @@ export const MODELS = {
       description: 'Fastest & cheapest - Best for classification & autocomplete',
       tier: 'lite',
       contextWindow: '1M tokens',
-      provider: 'openai',
-      isNew: true
+      provider: 'openai'
     },
     // O-series Reasoning Models
     {
@@ -157,9 +234,27 @@ export const MODELS = {
       provider: 'openai'
     },
     {
+      id: 'o3-deep-research',
+      name: 'o3 Deep Research',
+      description: 'Optimized for in-depth research & analysis',
+      tier: 'flagship',
+      contextWindow: '200K tokens',
+      provider: 'openai',
+      isNew: true
+    },
+    {
       id: 'o4-mini',
       name: 'o4-mini',
       description: 'Fast, cost-efficient reasoning model',
+      tier: 'standard',
+      contextWindow: '200K tokens',
+      provider: 'openai',
+      isNew: true
+    },
+    {
+      id: 'o4-mini-deep-research',
+      name: 'o4-mini Deep Research',
+      description: 'Deep research at lower cost',
       tier: 'standard',
       contextWindow: '200K tokens',
       provider: 'openai',
@@ -180,6 +275,32 @@ export const MODELS = {
       tier: 'standard',
       contextWindow: '200K tokens',
       provider: 'openai'
+    },
+    {
+      id: 'o1-pro',
+      name: 'o1 Pro',
+      description: 'Extended thinking version of o1',
+      tier: 'flagship',
+      contextWindow: '200K tokens',
+      provider: 'openai'
+    },
+    {
+      id: 'o1-mini',
+      name: 'o1-mini',
+      description: 'Fast, affordable o1 variant',
+      tier: 'lite',
+      contextWindow: '128K tokens',
+      provider: 'openai'
+    },
+    // Specialized Models
+    {
+      id: 'computer-use-preview',
+      name: 'Computer Use Preview',
+      description: 'Automated computer control & interaction',
+      tier: 'flagship',
+      contextWindow: '128K tokens',
+      provider: 'openai',
+      isNew: true
     },
     // GPT-4o Family - Legacy but still available
     {
